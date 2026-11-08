@@ -1,5 +1,10 @@
 # Policy for the exoplanet example wiki.
 
+[resolve]
+# Optional: a command that may suggest pages for a question that did not resolve. It reads JSON on
+# stdin and prints {"offers": [...]}; offers are asked, never chosen. Off unless set.
+# resolver_cmd = ["python", "tools/meaning.py"]
+
 [resolve.synonyms]
 "exo planet" = "exoplanet"
 
