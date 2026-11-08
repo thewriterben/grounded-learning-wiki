@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 """glw.py - checks for a Grounded Learning Wiki (an extension of the LLM Wiki pattern).
 
-    glw.py check [--root DIR] [--strict]          citations, quotes, numbers, one-way rules
+    glw.py check [--root DIR] [--strict]          raw/ lock, citations, quotes, numbers, one-way rules
+    glw.py lock [--root DIR] [--accept-changes]    record raw/ file hashes in glw.lock
     glw.py resolve [--root DIR] [--record-gap] QUESTION
     glw.py gaps [--root DIR]                       gaps, and which are due for a search
     glw.py learn-status [--root DIR] [--strict]    log days with no daily guide or session page
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import re
 import sys
@@ -24,7 +26,7 @@ from pathlib import Path
 
 DEFAULTS = {
     "paths": {"raw": "raw", "wiki": "wiki", "learning": "wiki/learning",
-              "gaps": "wiki/gaps", "proposals": "wiki/proposals"},
+              "gaps": "wiki/gaps", "proposals": "wiki/proposals", "lock": "glw.lock"},
     "verify": {"external_prefixes": ["doi:", "arxiv:", "isbn:", "https://", "http://"],
                "navigation_pages": ["index.md", "log.md"]},
     "resolve": {"synonyms": {}, "stopwords_extra": []},
@@ -40,8 +42,14 @@ FOOTREF = re.compile(r"\[\^([^\]\s]+)\](?!:)")
 QUOTE = re.compile(r"[\"“](.+?)[\"”]")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 MDLINK = re.compile(r"\]\(([^)\s]+)\)")
-# A number, but not the digits of a name such as TRAPPIST-1 or Kepler-452.
-NUMBER = re.compile(r"(?<![\w.])(?<![A-Za-z]-)\d+(?:\.\d+)?(?![\w])")
+# A number: a sign (- + or U+2212), thousands separators, decimals, e-notation, and a unit glued on
+# (40km, 0.92R, 7.1σ). Not the digits of a name: TRAPPIST-1 and Kepler-452b (letter-hyphen before),
+# v2 (letter before). The wiki line and the quote go through the same pattern, so they are read alike.
+NUMBER = re.compile(
+    r"(?:(?<![\w.])(?P<sign>[-+−]))?(?<![\w.])(?<![A-Za-z]-)"
+    r"(?P<int>\d{1,3}(?:,\d{3})+(?!\d)|\d+)(?P<frac>\.\d+)?"
+    r"(?:[eE](?P<exp>[-+−]?\d+))?(?P<unit>[^\W\d_]*)(?!\w)")
+MIN_QUOTE_WORDS = 3
 DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -118,6 +126,7 @@ class Wiki:
         p = self.cfg["paths"]
         self.raw, self.wiki = root / p["raw"], root / p["wiki"]
         self.learning, self.gaps, self.proposals = root / p["learning"], root / p["gaps"], root / p["proposals"]
+        self.lock = root / p["lock"]
         if not self.wiki.is_dir():
             sys.exit(f"no wiki directory at {self.wiki}")
         self.pages = md_files(self.wiki)
@@ -143,18 +152,96 @@ class Wiki:
 
 # ---------------------------------------------------------------- check
 
-def numbers_in(line: str) -> list[str]:
+def numbers_in(line: str, idents: frozenset[str] = frozenset()) -> list[str]:
+    """Numbers on a line, normalised: '-' for either minus, no thousands separators, unit dropped.
+    `idents` are identifiers from page names (1e, 452b): written without a hyphen they are not numbers."""
     line = FOOTREF.sub(" ", line)
     line = WIKILINK.sub(" ", line)
     line = MDLINK.sub("] ", line)
     line = re.sub(r"`[^`]*`", " ", line)
     line = DATE.sub(" ", line)
     line = re.sub(r"^\s*(?:#+|\d+\.|[-*+]|>)\s+", " ", line)
-    return NUMBER.findall(line)
+    out = []
+    for m in NUMBER.finditer(line):
+        if (m["int"] + (m["frac"] or "") + m["unit"]).lower() in idents:
+            continue
+        value = ("-" if m["sign"] in ("-", "−") else "") + m["int"].replace(",", "") + (m["frac"] or "")
+        if m["exp"]:
+            value += "e" + m["exp"].replace("−", "-").lstrip("+")
+        out.append(value)
+    return out
 
 
-def number_in_quote(number: str, quote: str) -> bool:
-    return re.search(r"(?<![\d.])" + re.escape(number) + r"(?!\d|\.\d)", quote) is not None
+def number_in_quote(number: str, quote: str, idents: frozenset[str] = frozenset()) -> bool:
+    return number in numbers_in(quote, idents)
+
+
+# ---------------------------------------------------------------- raw/ lock
+
+def raw_hashes(w: Wiki) -> dict[str, str]:
+    """sha256 of every file under raw/, line endings normalised so a Windows checkout hashes the same."""
+    out = {}
+    if w.raw.is_dir():
+        for path in sorted(w.raw.rglob("*")):
+            if path.is_file() and path.resolve() != w.lock.resolve():
+                out[w.rel(path)] = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+    return out
+
+
+def read_lock(w: Wiki) -> dict[str, str] | None:
+    if not w.lock.is_file():
+        return None
+    try:
+        data = json.loads(read(w.lock))
+    except json.JSONDecodeError as exc:
+        sys.exit(f"{w.lock.name}: {exc}")
+    if not isinstance(data, dict):
+        sys.exit(f"{w.lock.name}: expected a JSON object of path -> sha256")
+    return data
+
+
+def cmd_lock(w: Wiki, accept: bool) -> int:
+    old = read_lock(w) or {}
+    current = raw_hashes(w)
+    added = [p for p in current if p not in old]
+    changed = [p for p in old if p in current and current[p] != old[p]]
+    removed = [p for p in old if p not in current]
+    for p in changed:
+        print(f"CHANGED {p}")
+    for p in removed:
+        print(f"REMOVED {p}")
+    if (changed or removed) and not accept:
+        print("refused: raw/ is immutable. If you, the owner, made these edits on purpose, "
+              "run again with --accept-changes.")
+        return 1
+    new = {p: old[p] for p in old if p in current}
+    new.update({p: current[p] for p in added})
+    if accept:
+        new.update({p: current[p] for p in changed})
+    w.lock.write_text(json.dumps(dict(sorted(new.items())), indent=2) + "\n", encoding="utf-8")
+    for p in added:
+        print(f"ADDED   {p}")
+    print(f"{w.lock.name}: {len(new)} file(s), {len(added)} added, "
+          f"{len(changed) if accept else 0} accepted, {len(removed) if accept else 0} dropped")
+    return 0
+
+
+def check_lock(w: Wiki, strict: bool, errors: list[str], warnings: list[str]) -> None:
+    locked = read_lock(w)
+    name = w.lock.name
+    if locked is None:
+        warnings.append(f"no {name}: edits to raw/ cannot be detected; run glw.py lock")
+        return
+    current = raw_hashes(w)
+    for path, digest in locked.items():
+        if path not in current:
+            errors.append(f"{path}: in {name} but missing (sources are never removed)")
+        elif current[path] != digest:
+            errors.append(f"{path}: changed since it was locked (sources are immutable; "
+                          "only the owner may accept this with glw.py lock --accept-changes)")
+    for path in current:
+        if path not in locked:
+            (errors if strict else warnings).append(f"{path}: new source not in {name}; run glw.py lock")
 
 
 def cmd_check(w: Wiki, strict: bool) -> int:
@@ -162,6 +249,23 @@ def cmd_check(w: Wiki, strict: bool) -> int:
     warnings: list[str] = []
     prefixes = tuple(w.cfg["verify"]["external_prefixes"])
     raw_cache: dict[Path, str] = {}
+    entities = load_entities(w)
+    idents = frozenset(t for e in entities for n in e["names"] for t in n if has_digit(t))
+    names_of = {e["page"]: e["names"] for e in entities}
+    held_cache: dict[Path, set[str]] = {}
+
+    def numbers_on(page: Path) -> set[str]:
+        if page not in held_cache:
+            text = read(page)
+            _, s = frontmatter(text)
+            held_cache[page] = {x for ln in text.split("\n")[s:] for x in numbers_in(ln, idents)}
+        return held_cache[page]
+
+    def names_in(quote: str, names: list[list[str]]) -> bool:
+        have = set(tokens(quote))
+        return any(set(n) <= have for n in names)
+
+    check_lock(w, strict, errors, warnings)
 
     for page in w.pages:
         text = read(page)
@@ -170,9 +274,10 @@ def cmd_check(w: Wiki, strict: bool) -> int:
         rel = w.rel(page)
         in_learning = inside(page, w.learning)
         nav = w.is_navigation(page)
+        own_names = names_of.get(rel, [])
 
-        # footnote definitions
-        defs: dict[str, tuple[str, str | None, bool]] = {}  # id -> (target, quote, is_raw)
+        # footnote definitions: id -> {quote, kind (raw | external | wiki | bad), path}
+        defs: dict[str, dict] = {}
         for n, line in enumerate(lines[start:], start + 1):
             m = FOOTDEF.match(line)
             if not m:
@@ -181,33 +286,45 @@ def cmd_check(w: Wiki, strict: bool) -> int:
             qm = QUOTE.search(rest)
             quote = norm(qm.group(1)) if qm else None
             where = f"{rel}:{n}"
+            if quote is not None and len(quote.split()) < MIN_QUOTE_WORDS:
+                errors.append(f"{where}: [^{fid}] quote is too short to tie a value to its subject "
+                              f"(at least {MIN_QUOTE_WORDS} words)")
+            path = None
             if target.startswith(prefixes):
-                defs[fid] = (target, quote, False)
+                kind = "external"
                 warnings.append(f"{where}: external citation [^{fid}] cannot be checked locally")
-                continue
-            path = (w.root / target.split("#", 1)[0]).resolve()
-            if inside(path, w.raw):
-                if not path.is_file():
-                    errors.append(f"{where}: [^{fid}] cites {target}, which does not exist")
-                elif quote is None:
-                    errors.append(f"{where}: [^{fid}] cites {target} without a quote")
-                else:
-                    if path not in raw_cache:
-                        raw_cache[path] = norm(read(path))
-                    if quote not in raw_cache[path]:
-                        errors.append(f"{where}: [^{fid}] quote is not in {target} word for word")
-                defs[fid] = (target, quote, True)
-            elif inside(path, w.wiki):
-                if in_learning:
-                    defs[fid] = (target, quote, False)
-                else:
-                    errors.append(f"{where}: [^{fid}] cites a wiki page ({target}); "
-                                  "wiki pages cite raw sources only (one-way rule 1)")
-                    defs[fid] = (target, quote, False)
             else:
-                errors.append(f"{where}: [^{fid}] cites {target}, which is neither under raw/ "
-                              "nor an accepted external form")
-                defs[fid] = (target, quote, False)
+                path = (w.root / target.split("#", 1)[0]).resolve()
+                if inside(path, w.raw):
+                    kind = "raw"
+                    if not path.is_file():
+                        errors.append(f"{where}: [^{fid}] cites {target}, which does not exist")
+                    elif quote is None:
+                        errors.append(f"{where}: [^{fid}] cites {target} without a quote")
+                    else:
+                        if path not in raw_cache:
+                            raw_cache[path] = norm(read(path))
+                        if quote not in raw_cache[path]:
+                            errors.append(f"{where}: [^{fid}] quote is not in {target} word for word")
+                elif inside(path, w.wiki):
+                    kind = "wiki"
+                    if not in_learning:
+                        errors.append(f"{where}: [^{fid}] cites a wiki page ({target}); "
+                                      "wiki pages cite raw sources only (one-way rule 1)")
+                    elif not path.is_file():
+                        errors.append(f"{where}: [^{fid}] cites {target}, which does not exist")
+                else:
+                    kind = "bad"
+                    errors.append(f"{where}: [^{fid}] cites {target}, which is neither under raw/ "
+                                  "nor an accepted external form")
+            defs[fid] = {"quote": quote, "kind": kind, "path": path}
+            # A quote that names another page's subject and not this page's: the value may be the
+            # neighbour's (TRAPPIST-1f's radius on the TRAPPIST-1e page).
+            if quote and own_names and kind in ("raw", "external") and not names_in(quote, own_names):
+                others = [e["title"] for e in entities if e["page"] != rel and names_in(quote, e["names"])]
+                if others:
+                    warnings.append(f"{where}: [^{fid}] quote names {', '.join(others)} but not this "
+                                    "page's subject; check the value belongs here")
 
         used: set[str] = set()
         for n, line in enumerate(lines[start:], start + 1):
@@ -239,21 +356,36 @@ def cmd_check(w: Wiki, strict: bool) -> int:
             # numbers
             if nav or line.lstrip().startswith("#"):
                 continue
-            nums = numbers_in(line)
+            nums = numbers_in(line, idents)
             if not nums:
                 continue
-            raw_quotes = [defs[f][1] for f in refs if f in defs and defs[f][2] and defs[f][1]]
-            if raw_quotes:
+            cited = [defs[f] for f in refs if f in defs]
+            quotes = [d["quote"] for d in cited if d["kind"] in ("raw", "external") and d["quote"]]
+            if quotes:
                 for num in nums:
-                    if not any(number_in_quote(num, q) for q in raw_quotes):
+                    if not any(number_in_quote(num, q, idents) for q in quotes):
                         errors.append(f"{where}: {num} is not in any quote this line cites "
                                       "(the model never produces a number)")
-            elif refs:
-                pass  # external or learning citation: not checkable here
             elif in_learning:
-                if "[[" not in line:
+                # A learning page re-explains: each number must be on a wiki page the line points to.
+                targets = [hit for t in WIKILINK.findall(line)
+                           if (hit := w.resolve_link(t)) and not inside(hit, w.learning)]
+                targets += [d["path"] for d in cited if d["kind"] == "wiki" and d["path"].is_file()
+                            and not inside(d["path"], w.learning)]
+                if targets:
+                    held = set().union(*(numbers_on(t) for t in targets))
+                    for num in nums:
+                        if num not in held:
+                            errors.append(f"{where}: {num} is not on the page this line links "
+                                          f"({', '.join(sorted({t.stem for t in targets}))})")
+                else:
                     (errors if strict else warnings).append(
                         f"{where}: number(s) {', '.join(nums)} with no link to the wiki page that holds them")
+            elif refs:
+                if any(d["kind"] == "external" for d in cited):
+                    warnings.append(f"{where}: number(s) {', '.join(nums)} rest on an external citation "
+                                    "with no quote")
+                # citations of wiki pages or bad targets are already errors above
             elif not w.is_derived_area(page):
                 (errors if strict else warnings).append(f"{where}: uncited number(s) {', '.join(nums)}")
 
@@ -436,15 +568,20 @@ def cmd_resolve(w: Wiki, question: str, record_gap: bool) -> int:
             options = "which one"
         if not named:
             result["ask"].append(f"The answer for '{e['title']}' depends on its version: {options}?")
-    if not full and partial and result["unknown_terms"]:
+    # No page is named in full: never answer from a neighbour. Offer the pages that share a word,
+    # or call it a gap.
+    if not full and partial:
         result["offered"] = [e["title"] for e in partial]
         if not result["ask"]:
-            result["ask"].append("That is not in the wiki. Closest: " + ", ".join(result["offered"]) + ".")
+            result["ask"].append("That is not in the wiki as asked. Closest: "
+                                 + ", ".join(result["offered"]) + ".")
 
     if result["ask"]:
         result["status"] = "needs_clarification"
-    elif result["unknown_terms"] and not chosen:
+    elif not chosen:
         result["status"] = "gap"
+        if not result["unknown_terms"]:
+            result["reason"] = "no page is about this"
     else:
         # Unknown words next to a known subject are reported, not treated as a gap: whether the
         # subject's page holds the asked fact is for the agent to read (and file as a gap if not).
@@ -538,9 +675,14 @@ def cmd_proposals(w: Wiki) -> int:
 # ---------------------------------------------------------------- main
 
 def main(argv: list[str] | None = None) -> int:
+    # Questions and quotes carry non-ASCII (U+2212, typographic quotes, non-breaking hyphens);
+    # a cp1252 Windows console would otherwise crash on print.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(prog="glw.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("check", "resolve", "gaps", "learn-status", "proposals"):
+    for name in ("check", "resolve", "gaps", "learn-status", "proposals", "lock"):
         sp = sub.add_parser(name)
         sp.add_argument("--root", default=".", help="wiki root (holds glw.toml, raw/, wiki/)")
         if name in ("check", "learn-status"):
@@ -548,8 +690,13 @@ def main(argv: list[str] | None = None) -> int:
         if name == "resolve":
             sp.add_argument("--record-gap", action="store_true")
             sp.add_argument("question", nargs="+")
+        if name == "lock":
+            sp.add_argument("--accept-changes", action="store_true",
+                            help="record changed or removed raw/ files (the owner's call, never the agent's)")
     args = ap.parse_args(argv)
     w = Wiki(Path(args.root))
+    if args.cmd == "lock":
+        return cmd_lock(w, args.accept_changes)
     if args.cmd == "check":
         return cmd_check(w, args.strict)
     if args.cmd == "resolve":
