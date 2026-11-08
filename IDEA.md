@@ -31,18 +31,18 @@ before being written down here.
 ### 1. resolve: ask before you seek
 
 Before answering, read the question against what the wiki holds. Retrieval always finds a nearest
-neighbour; that is exactly how a wiki answers about T60 flour with T65's figures. So:
+neighbour; that is exactly how a wiki answers about TRAPPIST-1g with TRAPPIST-1f's figures. So:
 
 1. **Repair spelling, and say so.** A word the wiki has never seen is read as the nearest known word,
    within an edit budget (none under 5 letters, 1 edit from 5, 2 from 8; swapped letters count as one).
    The correction is shown to you, and you confirm any that changes the meaning.
-2. **Never fuzz a token with a digit in it.** `T60`, `c7`, `v2.1` are identifiers. Near ones are
-   *offered* as a question ("T55 or T65? T60 is not in the wiki"), never silently substituted.
+2. **Never fuzz a token with a digit in it.** `1g`, `452c`, `v2.1` are identifiers. Near ones (other digits, or other letters in the same shape) are
+   *offered* as a question ("1e or 1f? TRAPPIST-1g is not in the wiki"), never silently substituted.
 3. **Ask back when two readings tie.** If two known words are equally near and neither is much more
    common, the term is ambiguous: ask which one you meant. Do not search; a search engine would pick a
    reading for you.
 4. **Choose a subject only when every one of its words matches.** Partial matches are offered, never
-   chosen. A question can name several subjects ("T55 or T65?"); all are returned. Two pages matched
+   chosen. A question can name several subjects ("compare TRAPPIST-1e and TRAPPIST-1f"); all are returned. Two pages matched
    by the same words are asked back.
 5. **Ask for the version when the answer depends on one.** A page marked `versioned: true` (with its
    `versions: [v1, v2]` listed) is not answered until the question names one of them (or a context source supplies
@@ -73,7 +73,7 @@ stale.
 
 1. **Claims cite raw sources with a quote.** A citation is a footnote naming a file under `raw/` (or an
    external form such as `doi:`) followed by the exact words it relies on:
-   `[^t65]: raw/flour-types.md "T65 flour has an ash content of 0.62 to 0.75 percent"`.
+   `[^e]: raw/trappist-1-note.md "TRAPPIST-1e has a radius of about 0.92 Earth radii"`.
    The quote must appear in the file, word for word (whitespace aside).
 2. **The model never produces a number.** Every number on a line that cites a source must appear in
    one of that line's quotes. Extract by rule first (tables, `Key: value` lines); use the model only to
@@ -112,7 +112,7 @@ The wiki improves its own working, but only through proposals you approve. Each 
 `wiki/proposals/` with a `kind`, a `key`, its evidence and a `status` (`proposed` → `approved` /
 `rejected` → `applied`):
 
-- **synonym**: you answered a clarification ("by leaven I meant levain"), so propose the synonym.
+- **synonym**: you answered a clarification ("by goldilocks zone I meant the habitable zone"), so propose the synonym.
 - **source-host**: you promoted three candidates from one host, so propose trusting it.
 - **lesson**: you corrected an answer, so propose the rule that would have prevented it.
 - **schema**: a convention keeps being broken, so propose changing the convention.

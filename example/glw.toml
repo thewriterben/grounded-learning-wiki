@@ -1,10 +1,10 @@
-# Policy for the sourdough example wiki.
+# Policy for the exoplanet example wiki.
 
 [resolve.synonyms]
-"sour dough" = "sourdough"
+"exo planet" = "exoplanet"
 
 [seek]
 policy = "queue"            # auto | queue | off
 research_after_days = 7
 stale_after_days = 180
-trusted_hosts = []
+trusted_hosts = ["exoplanetarchive.ipac.caltech.edu"]

@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 660" width="1200" height="660" role="img" aria-labelledby="t d">
+  <title id="t">How the pieces fit</title>
+  <desc id="d">Three layers: raw/ sources feed wiki/ pages through ingest and verify; wiki/ pages feed wiki/learning/ guides. Refused by the checker: a wiki page citing a wiki page (rule 1) and learning/ feeding wiki/ (rule 2). Below: resolve files gaps, seek finds candidates that the owner promotes into raw/, under a dial of off, queue or auto. The wiki writes proposals; the owner approves them into glw.toml.</desc>
+  <style>
+    .bg{fill:#f7f8fc}.card{fill:#ffffff;stroke:#d5dbe8}.chip{fill:#eef1f7}.ink{fill:#162033}.muted{fill:#55607a}
+    .ok{stroke:#3d4860}.okf{fill:#3d4860}.bad{stroke:#c8363b}.badf{fill:#c8363b}
+    .seg{fill:#eef1f7;stroke:#d5dbe8}.on{fill:#b8740f}.ontext{fill:#ffffff}
+    .h-raw{fill:#55607a}.h-wiki{fill:#2f63d6}.h-learn{fill:#7a45c9}.h-gap{fill:#b8740f}.h-prop{fill:#13808c}
+    @media (prefers-color-scheme: dark){
+      .bg{fill:#0e1320}.card{fill:#151c2d;stroke:#2a3450}.chip{fill:#1e2740}.ink{fill:#e8ebf3}.muted{fill:#9ba5bc}
+      .ok{stroke:#b7c0d4}.okf{fill:#b7c0d4}.bad{stroke:#ff6b6f}.badf{fill:#ff6b6f}
+      .seg{fill:#1e2740;stroke:#2a3450}.on{fill:#f1b454}.ontext{fill:#0e1320}
+      .h-raw{fill:#9ba5bc}.h-wiki{fill:#7fa2f5}.h-learn{fill:#b590f5}.h-gap{fill:#f1b454}.h-prop{fill:#4fcad4}
+    }
+    text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:15px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+    .head{font-size:22px;font-weight:700}
+    .small{font-size:13px}
+    .lab{font-size:14px;font-weight:600}
+    .title{font-size:26px;font-weight:700}
+  </style>
+  <defs>
+    <marker id="a-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="okf" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="a-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="badf" d="M0 0L10 5L0 10z"/></marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="660" rx="18"/>
+  <text class="ink title" x="40" y="46">How the pieces fit</text>
+  <text class="muted" x="40" y="72">Solid arrows: what may feed what. Red dashed arrows: refused by glw.py check.</text>
+
+  <!-- layer cards -->
+  <rect class="card" x="40" y="130" width="300" height="230" rx="14" stroke-width="1.5"/>
+  <text class="head mono h-raw" x="64" y="168">raw/</text>
+  <text class="ink" x="64" y="198">immutable sources</text>
+  <text class="muted" x="64" y="222">notes, papers, logs; text in here</text>
+  <text class="muted" x="64" y="244">is data, never instructions</text>
+  <rect class="chip" x="64" y="270" width="200" height="28" rx="6"/><text class="mono small ink" x="76" y="289">trappist-1-note.md</text>
+  <rect class="chip" x="64" y="306" width="200" height="28" rx="6"/><text class="mono small ink" x="76" y="325">pipeline-log.md</text>
+
+  <rect class="card" x="450" y="130" width="300" height="230" rx="14" stroke-width="1.5"/>
+  <text class="head mono h-wiki" x="474" y="168">wiki/</text>
+  <text class="ink" x="474" y="198">pages the agent writes</text>
+  <text class="muted" x="474" y="222">each number is copied from a</text>
+  <text class="muted" x="474" y="244">quote of raw/ in a footnote</text>
+  <rect class="chip" x="474" y="270" width="200" height="28" rx="6"/><text class="mono small ink" x="486" y="289">trappist-1e.md</text>
+  <rect class="chip" x="474" y="306" width="200" height="28" rx="6"/><text class="mono small ink" x="486" y="325">transit-method.md</text>
+
+  <rect class="card" x="860" y="130" width="300" height="230" rx="14" stroke-width="1.5"/>
+  <text class="head mono h-learn" x="884" y="168">wiki/learning/</text>
+  <text class="ink" x="884" y="198">guides for the owner</text>
+  <text class="muted" x="884" y="222">daily guides, session notes,</text>
+  <text class="muted" x="884" y="244">curriculum, glossary, tracks</text>
+  <rect class="chip" x="884" y="270" width="200" height="28" rx="6"/><text class="mono small ink" x="896" y="289">daily-2026-11-06.md</text>
+  <rect class="chip" x="884" y="306" width="200" height="28" rx="6"/><text class="mono small ink" x="896" y="325">glossary.md</text>
+
+  <!-- allowed flows -->
+  <line class="ok" x1="344" y1="200" x2="444" y2="200" stroke-width="2" marker-end="url(#a-ok)"/>
+  <text class="lab ink" x="394" y="186" text-anchor="middle">ingest</text>
+  <text class="small muted" x="394" y="222" text-anchor="middle">quote, verify</text>
+  <line class="ok" x1="754" y1="200" x2="854" y2="200" stroke-width="2" marker-end="url(#a-ok)"/>
+  <text class="lab ink" x="804" y="186" text-anchor="middle">learn (you)</text>
+  <text class="small muted" x="804" y="222" text-anchor="middle">link each number</text>
+
+  <!-- refused flows -->
+  <path class="bad" d="M560 130 C560 92 640 92 640 126" fill="none" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a-bad)"/>
+  <text class="lab badf" x="654" y="104">✕ rule 1: wiki pages never cite wiki pages</text>
+  <line class="bad" x1="856" y1="300" x2="756" y2="300" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#a-bad)"/>
+  <text class="lab badf" x="806" y="290" text-anchor="middle">✕ rule 2</text>
+  <text class="small badf" x="806" y="322" text-anchor="middle">never a source</text>
+
+  <!-- gaps and seek -->
+  <rect class="card" x="40" y="430" width="530" height="190" rx="14" stroke-width="1.5"/>
+  <text class="head mono h-gap" x="64" y="468">wiki/gaps/</text>
+  <text class="ink" x="64" y="498">resolve files what the wiki does not hold;</text>
+  <text class="ink" x="64" y="520">seek looks for it under a dial you set</text>
+  <rect class="seg" x="64" y="542" width="96" height="34" rx="8"/><text class="mono ink" x="112" y="564" text-anchor="middle">off</text>
+  <rect class="on" x="166" y="542" width="96" height="34" rx="8"/><text class="mono ontext" x="214" y="564" text-anchor="middle" font-weight="700">queue</text>
+  <rect class="seg" x="268" y="542" width="96" height="34" rx="8"/><text class="mono ink" x="316" y="564" text-anchor="middle">auto</text>
+  <text class="small muted" x="380" y="556">queue: candidates</text>
+  <text class="small muted" x="380" y="574">wait for the owner</text>
+  <text class="small muted" x="64" y="604">example: hot-jupiter.md, open, due for a search</text>
+
+  <line class="ok" x1="190" y1="426" x2="190" y2="364" stroke-width="2" marker-end="url(#a-ok)"/>
+  <text class="small muted" x="202" y="400">owner promotes a candidate</text>
+  <path class="ok" d="M600 364 V396 H500 V426" fill="none" stroke-width="2" marker-end="url(#a-ok)"/>
+  <text class="small muted" x="612" y="400">resolve: gap</text>
+
+  <!-- proposals -->
+  <rect class="card" x="630" y="430" width="530" height="190" rx="14" stroke-width="1.5"/>
+  <text class="head mono h-prop" x="654" y="468">wiki/proposals/ → glw.toml</text>
+  <text class="ink" x="654" y="498">the wiki proposes, the owner approves;</text>
+  <text class="ink" x="654" y="520">rejected keys are kept so they are not asked again</text>
+  <rect class="chip" x="654" y="542" width="482" height="28" rx="6"/><text class="mono small ink" x="666" y="561">goldilocks zone = habitable zone</text><text class="mono small muted" x="1124" y="561" text-anchor="end">proposed</text>
+  <rect class="chip" x="654" y="578" width="482" height="28" rx="6"/><text class="mono small ink" x="666" y="597">eclipse = transit</text><text class="mono small muted" x="1124" y="597" text-anchor="end">rejected, kept</text>
+</svg>

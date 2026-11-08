@@ -1,7 +1,7 @@
 ---
-title: What is the ash content of T110 flour
+title: What is a hot Jupiter
 status: open
-question: What is the ash content of T110 flour?
+question: What is a hot Jupiter?
 asked: 2026-11-07
 last_searched:
 policy: queue

@@ -1,6 +1,6 @@
 # Glossary
 
-- **Ash content**: the mineral residue left when flour is burned. Higher means less refined, more of
-  the outer grain. Evidence: [[t55-flour]], [[t65-flour]].
-- **Levain**: a home-kept culture of flour and water that raises sourdough. Evidence: [[levain]].
-- **Hydration**: water as a share of flour weight. Evidence: [[house-loaf]].
+- **Transit**: the dip in a star's light as a planet crosses in front of it. Evidence: [[transit-method]].
+- **Orbital period**: the time a planet takes to go once round its star. Evidence: [[trappist-1e]].
+- **Earth radii**: a planet's size given as multiples of Earth's radius. Evidence: [[kepler-452b]].
+- **Habitable zone**: where a rocky planet could keep liquid water. Evidence: [[habitable-zone]].
