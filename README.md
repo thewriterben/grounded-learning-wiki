@@ -143,12 +143,12 @@ There is also a [curriculum](example/wiki/learning/curriculum.md).
 
 | Command | Does |
 |---|---|
-| `check [--strict]` | Checks that `raw/` matches `glw.lock`, that citations resolve and quotes are verbatim (three words or more), that cited lines carry only quoted numbers, that numbers on learning pages are on the page they link, and the one-way rules and dangling links. Warns when a quote names another page's subject. Flags uncited numbers and unlocked sources (errors with `--strict`). |
+| `check [--strict]` | Checks that `raw/` matches `glw.lock`, that citations resolve and quotes are verbatim (three words or more, one per footnote), that each cited claim (a paragraph, list item or table row) carries only quoted numbers, that a struck-out superseded value matches its own footnote, that numbers on learning pages are on the page they link, and the one-way rules and dangling links. Warns when a quote names another page's subject and when a page is an orphan. Flags uncited numbers and unlocked sources (errors with `--strict`). Skips fenced code. |
 | `lock [--accept-changes]` | Records a hash of every file in `raw/` in `glw.lock`. Refuses changed or removed sources unless the owner passes `--accept-changes`. |
-| `resolve [--record-gap] -- "<question>"` | Returns JSON with `resolved`, `needs_clarification` or `gap`, plus corrections and what to ask. |
-| `gaps` | Lists open gaps and marks the ones due for a search. |
+| `resolve [--record-gap] -- "<question>"` | Returns JSON with `resolved`, `needs_clarification` or `gap`, plus corrections, what to ask, and the bare numbers in the question. |
+| `gaps` | Lists open gaps, marks the ones due for a search (none under policy `off`), marks those a newer page may answer, and prints the trusted hosts. |
 | `learn-status [--strict]` | Lists days in the log with no daily guide or session note. |
-| `proposals` | Lists pending proposals, and flags repeats of rejected ones. |
+| `proposals` | Lists pending proposals and approved ones still to apply, and flags repeats of rejected ones. |
 
 Every command takes `--root <wiki>`. Tests: `python -m unittest discover -s tests -q`.
 
@@ -172,6 +172,8 @@ wiki/
   to match. A true number on the wrong subject is only partly caught: a quote that names another
   page's subject warns, but a right-subject quote used for the wrong attribute passes. That is the
   main error left.
+- A claim is a whole paragraph or list item, so in a long paragraph a number may be backed by any of
+  its quotes. Keep one fact per list item where it matters.
 - resolve works on words, not meaning. The synonyms and the proposals gate are how it learns your
   vocabulary.
 - Nothing here judges whether a source is any good.

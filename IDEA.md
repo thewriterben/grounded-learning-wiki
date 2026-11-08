@@ -57,8 +57,9 @@ Clarification comes before seeking: a gap that waits on your answer is not searc
 Each gap is a page in `wiki/gaps/` (status `open` → `candidates` → `promoted` or `closed`). The same
 gap asked in different words lands on the same page. A gap is searched (the wiki's own raw sources
 first, then the web) and re-searched only after a set interval. Hosts the wiki already trusts rank first.
+Before searching, each open gap's question is resolved again: a page added since may already answer it.
 
-What happens to what seek finds is a **policy**, per source tier, set in `glw.toml`:
+What happens to what seek finds is one **policy**, set in `glw.toml` (a typo is a config error):
 
 | Policy | Found pages are... | Fits |
 |---|---|---|
@@ -66,8 +67,8 @@ What happens to what seek finds is a **policy**, per source tier, set in `glw.to
 | `queue` | listed on the gap page as candidates; you promote one into `raw/` | anything a number will be taken from |
 | `off` | not searched; the gap is just recorded | private or sensitive areas |
 
-Pages older than `stale_after_days` are refreshed the same way. Local files you wrote never count as
-stale.
+At lint, the agent files pages older than `stale_after_days` as gaps, so they are refreshed the same
+way. Local files you wrote never count as stale.
 
 ### 3. verify: the grounding contract
 
@@ -76,12 +77,15 @@ stale.
    `[^e]: raw/trappist-1-note.md "TRAPPIST-1e has a radius of about 0.92 Earth radii"`.
    The quote must appear in the file, word for word (whitespace aside), and be at least three words
    long, enough to say what the value belongs to. Quote the subject's name with the value.
-2. **The model never produces a number.** Every number on a line that cites a source must appear in
-   one of that line's quotes (an external citation's quote counts too). Extract by rule first (tables, `Key: value` lines); use the model only to
+2. **The model never produces a number.** Every number in a claim that cites a source must appear in
+   one of that claim's quotes (an external citation's quote counts too). A claim is a paragraph, list
+   item or table row, so a wrapped sentence may carry its footnote on its last line; code blocks are
+   not claims. Extract by rule first (tables, `Key: value` lines); use the model only to
    map or phrase, never to supply a value. A number with no citation at all is flagged.
 3. **Agreement, supersession, conflict.** A second source with the same value is added as a second
    citation. A newer source that changes a value strikes the old line inline
-   (`~~old~~ *(superseded YYYY-MM-DD, see [^new])*`) rather than deleting it. Two sources that disagree
+   (`~~old value.[^old]~~ *(superseded YYYY-MM-DD, see [^new])*`) rather than deleting it. The old
+   footnote stays inside the struck text, and the old value is checked against it alone. Two sources that disagree
    are both kept and the page says so, dated.
 
 4. **The sources do not move.** `raw/` is locked: `glw.py lock` records a hash of every source in
@@ -117,15 +121,15 @@ Self-check questions can be exported as flashcards for any spaced-repetition app
 ### 5. learn (the wiki): proposals behind a gate
 
 The wiki improves its own working, but only through proposals you approve. Each is a page in
-`wiki/proposals/` with a `kind`, a `key`, its evidence and a `status` (`proposed` → `approved` /
-`rejected` → `applied`):
+`wiki/proposals/` with a `kind`, a `key`, its evidence and a `status`: `proposed`, then `approved` or
+`rejected` by you, then `applied` by the agent once the change is made:
 
 - **synonym**: you answered a clarification ("by goldilocks zone I meant the habitable zone"), so propose the synonym.
 - **source-host**: you promoted three candidates from one host, so propose trusting it.
 - **lesson**: you corrected an answer, so propose the rule that would have prevented it.
 - **schema**: a convention keeps being broken, so propose changing the convention.
 
-Rejected proposals stay on file, and the same key is not proposed again. What you approve and reject is
+Rejected proposals stay on file, and the same key (case and spacing aside) is not proposed again. What you approve and reject is
 itself evidence of what matters to you, and seek uses it to rank.
 
 ## Three one-way rules
@@ -161,12 +165,12 @@ wiki/
 
 | Command | Does |
 |---|---|
-| `check` | raw/ matches `glw.lock`; citations resolve, quotes are verbatim and at least three words, cited lines carry only quoted numbers, uncited numbers flagged, learning numbers are on the linked page, quotes about another subject warned, the one-way rules, dangling links |
+| `check` | raw/ matches `glw.lock`; citations resolve, quotes are verbatim, one per footnote and at least three words, cited claims carry only quoted numbers, superseded values checked against their own footnote, uncited numbers flagged, learning numbers are on the linked page, quotes about another subject warned, the one-way rules, dangling links, orphan pages |
 | `lock [--accept-changes]` | records the hash of every file in `raw/` in `glw.lock`; refuses changed or removed files unless the owner accepts them |
-| `resolve "<question>"` | the resolve rules above; JSON out: `resolved`, `needs_clarification` or `gap`, with corrections and what to ask; `--record-gap` files the gap |
-| `gaps` | gaps and which are due for a search |
+| `resolve "<question>"` | the resolve rules above; JSON out: `resolved`, `needs_clarification` or `gap`, with corrections, what to ask and the bare numbers asked about; `--record-gap` files the gap |
+| `gaps` | gaps, which are due for a search (none under `off`), and which a newer page may answer |
 | `learn-status` | days in the log with no daily guide or session summary |
-| `proposals` | pending proposals, and repeats of rejected ones |
+| `proposals` | pending proposals, repeats of rejected ones, and approved ones still to apply |
 
 Everything else (writing pages, judging relevance, the voice of the guides) stays with the agent and
 the schema.
