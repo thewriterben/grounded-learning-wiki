@@ -218,7 +218,8 @@ def cmd_lock(w: Wiki, accept: bool) -> int:
     new.update({p: current[p] for p in added})
     if accept:
         new.update({p: current[p] for p in changed})
-    w.lock.write_text(json.dumps(dict(sorted(new.items())), indent=2) + "\n", encoding="utf-8")
+    w.lock.write_text(json.dumps(dict(sorted(new.items())), indent=2) + "\n", encoding="utf-8",
+                      newline="\n")
     for p in added:
         print(f"ADDED   {p}")
     print(f"{w.lock.name}: {len(new)} file(s), {len(added)} added, "
