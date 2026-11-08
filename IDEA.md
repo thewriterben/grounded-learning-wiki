@@ -92,8 +92,12 @@ way. Local files you wrote never count as stale.
    `glw.lock`, and `check` fails when a locked source changes or disappears, so a source cannot be
    edited to agree with the wiki. A new source warns until it is locked (an error with `--strict`), so
    it shows up in review. Only the owner accepts a changed source (`lock --accept-changes`).
+5. **Every source says where it came from.** A source opens with frontmatter `source:` (a URL, a
+   `doi:`-style form, or `owner` for your own notes) and, for a URL, `retrieved:` with the date. A
+   source seek saved also keeps the `question:` that found it, and for it the URL and date are
+   required. A missing `source:` warns (an error with `--strict`).
 
-The checker enforces 1, 2 and 4 mechanically. It also warns when a quote names another page's subject
+The checker enforces 1, 2, 4 and 5 mechanically. It also warns when a quote names another page's subject
 and not this page's (a neighbour's value on the wrong page), and it holds learning pages to the wiki:
 a number on a learning line must appear on a wiki page that line links. That turns "the checking is
 still on you" into a script that runs after every edit.
@@ -116,7 +120,8 @@ copying them.
 - **Voice**: plain language first, then the mechanism, then the number, and every number carries a
   link to the wiki page that holds it. Say "not known" where the wiki says so.
 
-Self-check questions can be exported as flashcards for any spaced-repetition app.
+Self-check questions are exported as flashcards (`glw.py cards`): a CSV that Anki imports, each
+answer carrying the wiki page it rests on.
 
 ### 5. learn (the wiki): proposals behind a gate
 
@@ -165,12 +170,14 @@ wiki/
 
 | Command | Does |
 |---|---|
-| `check` | raw/ matches `glw.lock`; citations resolve, quotes are verbatim, one per footnote and at least three words, cited claims carry only quoted numbers, superseded values checked against their own footnote, uncited numbers flagged, learning numbers are on the linked page, quotes about another subject warned, the one-way rules, dangling links, orphan pages |
+| `check` | raw/ matches `glw.lock` and each source has provenance; citations resolve, quotes are verbatim, one per footnote and at least three words, cited claims carry only quoted numbers, superseded values checked against their own footnote, uncited numbers flagged, learning numbers are on the linked page, quotes about another subject warned, the one-way rules, dangling links, orphan pages; `--format json` for agents, `github` for pull request annotations |
 | `lock [--accept-changes]` | records the hash of every file in `raw/` in `glw.lock`; refuses changed or removed files unless the owner accepts them |
 | `resolve "<question>"` | the resolve rules above; JSON out: `resolved`, `needs_clarification` or `gap`, with corrections, what to ask and the bare numbers asked about; `--record-gap` files the gap |
 | `gaps` | gaps, which are due for a search (none under `off`), and which a newer page may answer |
 | `learn-status` | days in the log with no daily guide or session summary |
 | `proposals` | pending proposals, repeats of rejected ones, and approved ones still to apply |
+| `cards` | self-check questions and answers as flashcards (Anki CSV) |
+| `eval` | your wiki's own test cases: questions with the status resolve should give, and edits check should catch; prints accuracy, precision and recall |
 
 Everything else (writing pages, judging relevance, the voice of the guides) stays with the agent and
 the schema.
@@ -180,7 +187,9 @@ the schema.
 In the implementations this was distilled from, rule-based extraction read every table and field value
 correctly in a hand-graded sample, and model extraction of prose about 70%, which is why the model is
 held to quoted values. The samples were small (50 claims, 30 retrieval questions) and written by the
-builders. Treat the numbers as a reason to measure your own, not as a benchmark.
+builders. Treat the numbers as a reason to measure your own, not as a benchmark. `glw.py eval` is how:
+keep the questions and edits your wiki got wrong in `eval/`, and it reports how many resolve as
+expected and how precise check's catches are, on your wiki rather than the builders'.
 
 The quote check catches invented and altered numbers, and the lock stops a source being edited to
 match. A true number attached to the wrong subject is only partly caught: the checker warns when the

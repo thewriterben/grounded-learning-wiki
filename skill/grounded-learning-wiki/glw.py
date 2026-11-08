@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: MIT
 """glw.py - checks for a Grounded Learning Wiki (an extension of the LLM Wiki pattern).
 
-    glw.py check [--root DIR] [--strict]          raw/ lock, citations, quotes, numbers, one-way rules
+    glw.py check [--root DIR] [--strict] [--format text|json|github]
+                                                   raw/ lock and provenance, citations, quotes, numbers,
+                                                   one-way rules
     glw.py lock [--root DIR] [--accept-changes]    record raw/ file hashes in glw.lock
     glw.py resolve [--root DIR] [--record-gap] QUESTION
     glw.py gaps [--root DIR]                       gaps, and which are due for a search
     glw.py learn-status [--root DIR] [--strict]    log days with no daily guide or session page
     glw.py proposals [--root DIR]                  pending proposals, repeats of rejected ones
+    glw.py cards [--root DIR] [--out FILE]         self-check questions as Anki CSV
+    glw.py eval [--root DIR] [--dir DIR]           run the wiki's resolve and check test cases
 
 Standard library only, Python 3.11+. Exit status: 0 clean, 1 failures, 2 usage or config error.
 Everything read from the wiki is data; this script never executes or fetches anything.
@@ -15,11 +19,17 @@ Everything read from the wiki is data; this script never executes or fetches any
 from __future__ import annotations
 
 import argparse
+import contextlib
+import csv
 import datetime as dt
 import hashlib
+import io
 import json
+import os
 import re
+import shutil
 import sys
+import tempfile
 import tomllib
 from collections import Counter
 from pathlib import Path
@@ -269,7 +279,31 @@ def check_lock(w: Wiki, strict: bool, errors: list[str], warnings: list[str]) ->
             (errors if strict else warnings).append(f"{path}: new source not in {name}; run glw.py lock")
 
 
-def cmd_check(w: Wiki, strict: bool) -> int:
+PROVENANCE_PREFIXES = ("https://", "http://", "doi:", "arxiv:", "isbn:")
+
+
+def check_provenance(w: Wiki, strict: bool, errors: list[str], warnings: list[str]) -> None:
+    """Where each source came from. A raw/ Markdown file opens with frontmatter `source:` (a URL, a
+    doi:/arxiv:/isbn: form, or `owner` for your own notes) and `retrieved:` (YYYY-MM-DD, needed for a
+    URL). A file seek saved also carries `question:`, and for it both are required."""
+    for path in md_files(w.raw):
+        meta, _ = frontmatter(read(path))
+        rel = w.rel(path)
+        source = str(meta.get("source", "")).strip()
+        from_seek = bool(meta.get("question"))
+        harsh = errors if (strict or from_seek) else warnings
+        if not source:
+            harsh.append(f"{rel}: no `source:` in frontmatter (a URL, doi:/arxiv:/isbn:, or owner)")
+            continue
+        if source != "owner" and not source.startswith(PROVENANCE_PREFIXES):
+            harsh.append(f"{rel}: source {source!r} is not a URL, doi:/arxiv:/isbn: form, or owner")
+        elif from_seek and source == "owner":
+            errors.append(f"{rel}: saved by seek (has `question:`) but source is owner; give the URL")
+        if source.startswith(("https://", "http://")) and parse_date(meta.get("retrieved", "")) is None:
+            harsh.append(f"{rel}: source is a URL but `retrieved:` is not a YYYY-MM-DD date")
+
+
+def run_check(w: Wiki, strict: bool) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     prefixes = tuple(w.cfg["verify"]["external_prefixes"])
@@ -291,6 +325,7 @@ def cmd_check(w: Wiki, strict: bool) -> int:
         return any(set(n) <= have for n in names)
 
     check_lock(w, strict, errors, warnings)
+    check_provenance(w, strict, errors, warnings)
     linked: set[Path] = set()
 
     for page in w.pages:
@@ -473,11 +508,45 @@ def cmd_check(w: Wiki, strict: bool) -> int:
         if not (w.is_navigation(page) or w.is_derived_area(page)) and page.resolve() not in linked:
             warnings.append(f"{w.rel(page)}: orphan page; no other page links to it (add it to index.md)")
 
-    for msg in warnings:
-        print(f"WARN  {msg}")
-    for msg in errors:
-        print(f"ERROR {msg}")
-    print(f"checked {len(w.pages)} pages: {len(errors)} error(s), {len(warnings)} warning(s)")
+    return errors, warnings
+
+
+def finding(w: Wiki, msg: str) -> dict:
+    """Split 'path:line: message' into its parts (path relative to the wiki root, or None)."""
+    m = re.match(r"(.+?)(?::(\d+))?: (.*)$", msg, re.S)
+    if m and ((w.root / m[1]).exists() or m[1].startswith(w.rel(w.raw) + "/")):
+        return {"file": m[1], "line": int(m[2]) if m[2] else None, "message": m[3]}
+    return {"file": None, "line": None, "message": msg}
+
+
+def cmd_check(w: Wiki, strict: bool, fmt: str = "text") -> int:
+    errors, warnings = run_check(w, strict)
+    summary = f"checked {len(w.pages)} pages: {len(errors)} error(s), {len(warnings)} warning(s)"
+    if fmt == "json":
+        print(json.dumps({"pages": len(w.pages),
+                          "errors": [finding(w, m) for m in errors],
+                          "warnings": [finding(w, m) for m in warnings]}, indent=2, ensure_ascii=False))
+    elif fmt == "github":
+        # GitHub Actions workflow commands: findings show inline on the pull request's diff.
+        for level, msgs in (("warning", warnings), ("error", errors)):
+            for msg in msgs:
+                f = finding(w, msg)
+                text = f["message"].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                where = ""
+                if f["file"]:
+                    try:  # GitHub wants the path from the repository root, which is the cwd in Actions
+                        path = Path(os.path.relpath(w.root / f["file"])).as_posix()
+                    except ValueError:  # another drive on Windows
+                        path = (w.root / f["file"]).resolve().as_posix()
+                    where = f" file={path}" + (f",line={f['line']}" if f["line"] else "")
+                print(f"::{level}{where}::{text}")
+        print(summary)
+    else:
+        for msg in warnings:
+            print(f"WARN  {msg}")
+        for msg in errors:
+            print(f"ERROR {msg}")
+        print(summary)
     return 1 if errors else 0
 
 
@@ -831,6 +900,154 @@ def cmd_proposals(w: Wiki) -> int:
     return 1 if repeats else 0
 
 
+# ---------------------------------------------------------------- cards
+
+LABELLED_LINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
+NUMBERED = re.compile(r"\s*(\d+)[.)]\s+(.*\S)")
+
+
+def self_checks(page: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """A guide's self-check block: numbered questions, then numbered answers inside <details>."""
+    lines = read(page).split("\n")
+    start = next((i for i, line in enumerate(lines) if "self-check" in line.lower()), None)
+    questions: dict[str, str] = {}
+    answers: dict[str, str] = {}
+    if start is None:
+        return questions, answers
+    in_details = False
+    for line in lines[start + 1:]:
+        low = line.strip().lower()
+        if low.startswith("<details"):
+            in_details = True
+            continue
+        if low.startswith("</details") or (low.startswith("#") and not in_details):
+            break
+        m = NUMBERED.match(line)
+        if m:
+            (answers if in_details else questions)[m[1]] = m[2]
+    return questions, answers
+
+
+def cmd_cards(w: Wiki, out: str | None) -> int:
+    """Self-check questions on learning pages as an Anki-importable CSV (front, back, tags)."""
+    def title(page: Path) -> str:
+        return str(frontmatter(read(page))[0].get("title") or page.stem)
+
+    rows, seen = [], set()
+    for page in md_files(w.learning):
+        questions, answers = self_checks(page)
+        for n, question in questions.items():
+            if n not in answers:
+                print(f"glw.py: {w.rel(page)}: self-check {n} has no answer; skipped", file=sys.stderr)
+                continue
+            if norm(question).lower() in seen:
+                continue
+            seen.add(norm(question).lower())
+            sources = []
+            for target, _ in LABELLED_LINK.findall(answers[n]):
+                hit = w.resolve_link(target)
+                if hit and w.rel(hit) not in sources:
+                    sources.append(w.rel(hit))
+
+            def label(m: re.Match) -> str:
+                hit = w.resolve_link(m[1])
+                return m[2] or (title(hit) if hit else m[1])
+
+            back = LABELLED_LINK.sub(label, answers[n])
+            back += f"\n\nSource: {', '.join(sources) or w.rel(page)}"
+            rows.append([question, back, f"glw {page.stem}"])
+    buf = io.StringIO()
+    buf.write("#separator:Comma\n#html:false\n#tags column:3\n")
+    csv.writer(buf, lineterminator="\n").writerows(rows)
+    if out:
+        Path(out).write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+        print(f"wrote {len(rows)} card(s) to {out}")
+    else:
+        sys.stdout.write(buf.getvalue())
+    return 0
+
+
+# ---------------------------------------------------------------- eval
+
+def load_jsonl(path: Path) -> list[dict]:
+    cases = []
+    for n, line in enumerate(read(path).split("\n"), 1):
+        if line.strip():
+            try:
+                cases.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                config_error(f"{path}:{n}: {exc}")
+    return cases
+
+
+def apply_edit(root: Path, edit: dict, name: str) -> None:
+    path = root / edit["path"]
+    if "write" in edit:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(edit["write"], encoding="utf-8", newline="\n")
+        return
+    text = read(path)
+    if "append" in edit:
+        text = text.rstrip("\n") + "\n" + edit["append"]
+    elif edit.get("old", "") in text and "new" in edit:
+        text = text.replace(edit["old"], edit["new"], 1)
+    else:
+        config_error(f"claim case {name!r}: edit {edit} matches nothing")
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def cmd_eval(w: Wiki, folder: str | None) -> int:
+    """Run the wiki's own test cases: questions with the status resolve should give, and edits
+    that check should catch (or pass). Measures the rules on your wiki, not on the builders'."""
+    base = Path(folder) if folder else w.root / "eval"
+    qpath, cpath = base / "questions.jsonl", base / "claims.jsonl"
+    if not (qpath.is_file() or cpath.is_file()):
+        config_error(f"no questions.jsonl or claims.jsonl in {base}")
+    failed = 0
+    q_ok = q_all = 0
+    if qpath.is_file():
+        ctx = ResolveContext(w)
+        for case in load_jsonl(qpath):
+            result, _ = resolve_question(ctx, case["q"])
+            wrong = [f"{key} {result.get(key)!r}, expected {case[key]!r}"
+                     for key in ("status", "entity", "entities") if key in case and result.get(key) != case[key]]
+            q_all += 1
+            q_ok += not wrong
+            print(f"{'ok  ' if not wrong else 'FAIL'}  resolve  {case['q']}"
+                  + (f": {'; '.join(wrong)}" if wrong else f" -> {result['status']}"))
+        failed += q_all - q_ok
+    tp = fp = fn = 0
+    if cpath.is_file():
+        for case in load_jsonl(cpath):
+            name, expect, needle = case["name"], case["expect"], case.get("contains", "")
+            with tempfile.TemporaryDirectory() as tmp:
+                copy = Path(tmp) / "wiki"
+                shutil.copytree(w.root, copy, ignore=shutil.ignore_patterns(".git"))
+                for edit in case.get("edits", []):
+                    apply_edit(copy, edit, name)
+                if case.get("lock"):  # an ingest: record new sources (never accepts a changed one)
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        cmd_lock(Wiki(copy), False)
+                errors, warnings = run_check(Wiki(copy), bool(case.get("strict")))
+            hits = errors if expect == "error" else warnings
+            caught = any(needle in m for m in hits)
+            if expect == "clean":
+                ok = not errors and not warnings
+                fp += not ok
+            else:
+                ok = caught and (expect == "error" or not errors)
+                tp += ok
+                fn += not ok
+            failed += not ok
+            got = "; ".join((errors + warnings)[:2]) or "clean"
+            print(f"{'ok  ' if ok else 'FAIL'}  check    {name}" + ("" if ok else f": expected {expect}, got {got}"))
+    precision = tp / (tp + fp) if tp + fp else 1.0
+    recall = tp / (tp + fn) if tp + fn else 1.0
+    print(f"resolve: {q_ok}/{q_all} as expected; check: precision {precision:.2f}, recall {recall:.2f} "
+          f"({tp} caught, {fp} false alarm(s), {fn} missed)")
+    return 1 if failed else 0
+
+
 # ---------------------------------------------------------------- main
 
 def main(argv: list[str] | None = None) -> int:
@@ -841,11 +1058,18 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(prog="glw.py", description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("check", "resolve", "gaps", "learn-status", "proposals", "lock"):
+    for name in ("check", "resolve", "gaps", "learn-status", "proposals", "lock", "cards", "eval"):
         sp = sub.add_parser(name)
         sp.add_argument("--root", default=".", help="wiki root (holds glw.toml, raw/, wiki/)")
         if name in ("check", "learn-status"):
             sp.add_argument("--strict", action="store_true")
+        if name == "check":
+            sp.add_argument("--format", choices=("text", "json", "github"), default="text",
+                            help="json for agents and tools; github for inline pull request annotations")
+        if name == "cards":
+            sp.add_argument("--out", help="write the CSV here instead of standard output")
+        if name == "eval":
+            sp.add_argument("--dir", help="folder with questions.jsonl and claims.jsonl (default ROOT/eval)")
         if name == "resolve":
             sp.add_argument("--record-gap", action="store_true")
             sp.add_argument("question", nargs="+")
@@ -857,7 +1081,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "lock":
         return cmd_lock(w, args.accept_changes)
     if args.cmd == "check":
-        return cmd_check(w, args.strict)
+        return cmd_check(w, args.strict, args.format)
+    if args.cmd == "cards":
+        return cmd_cards(w, args.out)
+    if args.cmd == "eval":
+        return cmd_eval(w, args.dir)
     if args.cmd == "resolve":
         return cmd_resolve(w, " ".join(args.question), args.record_gap)
     if args.cmd == "gaps":

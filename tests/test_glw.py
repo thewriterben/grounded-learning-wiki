@@ -1,5 +1,6 @@
 """Tests for glw.py against the exoplanet example and broken copies of it. Run: python -m unittest -q"""
 import contextlib
+import csv
 import io
 import json
 import os
@@ -7,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -270,7 +272,7 @@ class BrokenCopies(unittest.TestCase):
 
     def test_new_source_must_be_locked(self):
         with Copy() as root:
-            (root / "raw/new-note.md").write_text("A new note.\n", encoding="utf-8")
+            (root / "raw/new-note.md").write_text("---\nsource: owner\n---\nA new note.\n", encoding="utf-8")
             code, out = self.check(root)
             self.assertEqual(code, 0)
             self.assertIn("raw/new-note.md: new source not in glw.lock", out)
@@ -446,6 +448,113 @@ class BrokenCopies(unittest.TestCase):
             self.assertIn("REPEAT", out)
             self.assertIn("TO APPLY", out)
             self.assertIn("1 approved to apply", out)
+
+
+class Additions(unittest.TestCase):
+    """check --format, raw provenance, cards, eval and packaging."""
+
+    def break_radius(self, root):
+        page = root / "wiki/entities/trappist-1e.md"
+        page.write_text(page.read_text(encoding="utf-8").replace("- Radius: about 0.92", "- Radius: about 0.95"),
+                        encoding="utf-8")
+
+    def test_check_json_splits_file_and_line(self):
+        with Copy() as root:
+            self.break_radius(root)
+            code, out = run("check", "--root", root, "--format", "json")
+            self.assertEqual(code, 1)
+            report = json.loads(out)
+            self.assertEqual(report["pages"], 16)
+            err = report["errors"][0]
+            self.assertEqual(err["file"], "wiki/entities/trappist-1e.md")
+            self.assertIsInstance(err["line"], int)
+            self.assertIn("0.95 is not in any quote", err["message"])
+
+    def test_check_github_annotations(self):
+        with Copy() as root:
+            self.break_radius(root)
+            (root / "glw.lock").unlink()
+            code, out = run("check", "--root", root, "--format", "github")
+            self.assertEqual(code, 1)
+            lines = out.splitlines()
+            self.assertTrue(any(line.startswith("::error file=") and "trappist-1e.md,line=" in line
+                                for line in lines), out)
+            self.assertTrue(any(line.startswith("::warning::no glw.lock") for line in lines), out)
+            self.assertTrue(lines[-1].startswith("checked 16 pages"))
+
+    def test_raw_source_needs_provenance(self):
+        with Copy() as root:
+            note = root / "raw/hz-note.md"
+            note.write_text(note.read_text(encoding="utf-8").replace("source: owner\n", ""), encoding="utf-8")
+            run("lock", "--root", root, "--accept-changes")
+            code, out = run("check", "--root", root)
+            self.assertEqual(code, 0)
+            self.assertIn("raw/hz-note.md: no `source:`", out)
+            self.assertEqual(run("check", "--root", root, "--strict")[0], 1)
+
+    def test_seek_saved_source_needs_url_and_date(self):
+        with Copy() as root:
+            found = root / "raw/found.md"
+            found.write_text("---\nsource: https://example.org/hot-jupiters\nquestion: What is a hot Jupiter?\n"
+                             "---\nA hot Jupiter is a gas giant on a short orbit.\n", encoding="utf-8")
+            run("lock", "--root", root)
+            code, out = run("check", "--root", root)
+            self.assertEqual(code, 1)
+            self.assertIn("`retrieved:` is not a YYYY-MM-DD date", out)
+            found.write_text(found.read_text(encoding="utf-8").replace("question:", "retrieved: 2026-11-07\nquestion:"),
+                             encoding="utf-8")
+            run("lock", "--root", root, "--accept-changes")
+            code, out = run("check", "--root", root, "--strict")
+            self.assertEqual(code, 0, out)
+
+    def test_cards_pair_questions_with_answers(self):
+        code, out = run("cards", "--root", EXAMPLE)
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("#separator:Comma\n#html:false\n#tags column:3\n"))
+        rows = list(csv.reader(line for line in out.splitlines(keepends=True) if not line.startswith("#")))
+        self.assertEqual(len(rows), 2)
+        front, back, tags = rows[0]
+        self.assertEqual(front, "What does the depth of a transit tell you?")
+        self.assertIn("(Transit method)", back)
+        self.assertNotIn("[[", back)
+        self.assertIn("Source: wiki/concepts/transit-method.md", back)
+        self.assertEqual(tags, "glw daily-2026-11-06")
+
+    def test_cards_skip_question_without_answer(self):
+        with Copy() as root:
+            guide = root / "wiki/learning/daily/daily-2026-11-06.md"
+            text = guide.read_text(encoding="utf-8")
+            guide.write_text("\n".join(l for l in text.split("\n") if not l.startswith("2. Because")),
+                             encoding="utf-8")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code, out = run("cards", "--root", root)
+            self.assertEqual(code, 0)
+            self.assertIn("self-check 2 has no answer", err.getvalue())
+            self.assertEqual(sum(1 for l in out.splitlines() if l.startswith("What") or l.startswith("Why")), 1)
+
+    def test_eval_on_example_passes(self):
+        code, out = run("eval", "--root", EXAMPLE)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("FAIL", out)
+        self.assertIn("precision 1.00, recall 1.00", out)
+
+    def test_eval_reports_a_wrong_expectation(self):
+        with Copy() as root:
+            qs = root / "eval/questions.jsonl"
+            qs.write_text('{"q": "What is the radius of TRAPPIST-1g?", "status": "resolved"}\n', encoding="utf-8")
+            (root / "eval/claims.jsonl").write_text(
+                '{"name": "untouched wiki is not an error", "edits": [], "expect": "error"}\n', encoding="utf-8")
+            code, out = run("eval", "--root", root)
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL  resolve  What is the radius of TRAPPIST-1g?: status 'needs_clarification'", out)
+            self.assertIn("recall 0.00", out)
+
+    def test_console_script_points_at_main(self):
+        meta = tomllib.loads((HERE.parent / "pyproject.toml").read_text(encoding="utf-8"))
+        module, func = meta["project"]["scripts"]["glw"].split(":")
+        self.assertEqual(module, "glw")
+        self.assertTrue(callable(getattr(glw, func)))
 
 
 if __name__ == "__main__":

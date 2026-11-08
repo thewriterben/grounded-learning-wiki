@@ -25,5 +25,12 @@ jobs:
       - name: Example wiki passes its own checks
         shell: bash
         run: |
-          python skill/grounded-learning-wiki/glw.py check --root example --strict
+          python skill/grounded-learning-wiki/glw.py check --root example --strict --format github
           python skill/grounded-learning-wiki/glw.py learn-status --root example --strict
+      - name: Example wiki eval (resolve and check test cases)
+        run: python skill/grounded-learning-wiki/glw.py eval --root example
+      - name: Package builds and the glw command runs
+        shell: bash
+        run: |
+          python -m pip install --no-deps .
+          glw check --root example --strict

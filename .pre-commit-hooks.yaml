@@ -1,0 +1,7 @@
+- id: glw-check
+  name: glw check
+  description: Grounded Learning Wiki checks (raw/ lock and provenance, quotes, numbers, one-way rules)
+  entry: glw check
+  language: python
+  pass_filenames: false
+  files: '\.(md|toml)$|glw\.lock$'

@@ -1,3 +1,6 @@
+---
+source: owner
+---
 # Note on the transit method
 
 Illustrative text written for this demo. The figures are rounded and published values get revised, so check a current catalogue before using them.
