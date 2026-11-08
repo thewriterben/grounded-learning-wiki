@@ -22,7 +22,7 @@ Hard rules, in every operation:
 ## Query: resolve first
 
 1. Run `glw.py resolve -- "<the question>"`. Read the JSON.
-2. `corrections`: tell the user what you read their words as ("Reading 'levian' as 'levain'.").
+2. `corrections`: tell the user what you read their words as ("Reading 'trnasit' as 'transit'.").
 3. `needs_clarification`: ask the `ask` lines, then stop. Do not search and do not answer from a
    neighbouring page. When the user answers, if their answer maps one word onto another, file a synonym
    proposal (below).
@@ -71,12 +71,12 @@ activity: teach the next lesson of a track in `learning/tracks/` instead. Update
 (F foundation / D deepened with date / B backlog) and add new terms to `glossary.md`.
 
 Voice: plain words first, then the mechanism, then the number. Every number on a learning page links
-the wiki page that holds it (`[[t65-flour]]`). Say "not known" where the wiki does.
+the wiki page that holds it (`[[trappist-1e]]`). Say "not known" where the wiki does.
 
 ## Learn (the wiki): proposals
 
 Write `wiki/proposals/<slug>.md` with frontmatter `title`, `kind` (synonym | source-host | lesson |
-schema), `key` (for a synonym, `leaven=levain`), `status: proposed`, `proposed: YYYY-MM-DD`, and a body
+schema), `key` (for a synonym, `goldilocks zone=habitable zone`), `status: proposed`, `proposed: YYYY-MM-DD`, and a body
 giving the evidence. Triggers: the user resolved a clarification; the user promoted three candidates from
 one host; the user corrected an answer; a convention keeps failing `check`.
 

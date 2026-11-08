@@ -40,7 +40,8 @@ FOOTREF = re.compile(r"\[\^([^\]\s]+)\](?!:)")
 QUOTE = re.compile(r"[\"“](.+?)[\"”]")
 WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 MDLINK = re.compile(r"\]\(([^)\s]+)\)")
-NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?![\w])")
+# A number, but not the digits of a name such as TRAPPIST-1 or Kepler-452.
+NUMBER = re.compile(r"(?<![\w.])(?<![A-Za-z]-)\d+(?:\.\d+)?(?![\w])")
 DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 TOKEN = re.compile(r"[a-z0-9]+")
 
@@ -65,6 +66,13 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def unquote(value: str) -> str:
+    """Strip one pair of matching outer quotes only, so 'Read "a" as "b"' keeps its inner quotes."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
 def frontmatter(text: str) -> tuple[dict, int]:
     """Minimal YAML subset: `key: value` and `key: [a, b]`. Returns (meta, first body line index)."""
     lines = text.split("\n")
@@ -80,9 +88,9 @@ def frontmatter(text: str) -> tuple[dict, int]:
         key, value = line.split(":", 1)
         value = value.split(" #", 1)[0].strip()
         if value.startswith("[") and value.endswith("]"):
-            meta[key.strip()] = [v.strip().strip("\"'") for v in value[1:-1].split(",") if v.strip()]
+            meta[key.strip()] = [unquote(v.strip()) for v in value[1:-1].split(",") if v.strip()]
         else:
-            meta[key.strip()] = value.strip("\"'")
+            meta[key.strip()] = unquote(value)
     return {}, 0
 
 
@@ -302,9 +310,20 @@ def has_digit(word: str) -> bool:
 
 
 def digit_neighbours(word: str, vocab: Counter) -> list[str]:
-    letters = re.sub(r"\d", "", word)
-    return sorted(v for v in vocab if v != word and has_digit(v)
-                  and re.sub(r"\d", "", v) == letters and abs(len(v) - len(word)) <= 1)
+    """Identifiers that differ in one part: same letters, other digits (t60 -> t55, t65), or same
+    digits, other letters (1g -> 1e, 1f)."""
+    def shape(w: str) -> str:
+        return re.sub(r"[a-z]", "a", re.sub(r"\d", "0", w))
+
+    letters, digits = re.sub(r"\d", "", word), re.sub(r"\D", "", word)
+    out = []
+    for v in vocab:
+        if v == word or not has_digit(v) or abs(len(v) - len(word)) > 1:
+            continue
+        v_letters, v_digits = re.sub(r"\d", "", v), re.sub(r"\D", "", v)
+        if v_letters == letters or (v_digits == digits and letters and shape(v) == shape(word)):
+            out.append(v)
+    return sorted(out)
 
 
 def load_entities(w: Wiki) -> list[dict]:

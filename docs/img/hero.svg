@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-labelledby="t d">
+  <title id="t">Grounded Learning Wiki</title>
+  <desc id="d">An LLM Wiki that asks before it answers, never invents a number, and teaches its owner as it grows. Five operations: resolve, seek, verify, learn (you), learn (the wiki). A star with a planet in transit and the dip it makes in the star's light.</desc>
+  <style>
+    .bg{fill:#f7f8fc}.ink{fill:#162033}.muted{fill:#55607a}.rule{stroke:#d5dbe8}
+    .curve{stroke:#55607a}.orbit{stroke:#b6bfd3}.planet{fill:#162033}
+    .resolve{--c:#2f63d6}.seek{--c:#b8740f}.verify{--c:#23864b}.you{--c:#7a45c9}.wiki{--c:#13808c}
+    @media (prefers-color-scheme: dark){
+      .bg{fill:#0e1320}.ink{fill:#e8ebf3}.muted{fill:#9ba5bc}.rule{stroke:#27304a}
+      .curve{stroke:#9ba5bc}.orbit{stroke:#3a4664}.planet{fill:#0e1320}
+      .resolve{--c:#7fa2f5}.seek{--c:#f1b454}.verify{--c:#5fcf8c}.you{--c:#b590f5}.wiki{--c:#4fcad4}
+    }
+    text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+    .mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+    .pill rect{fill:var(--c);fill-opacity:.12;stroke:var(--c);stroke-width:1.5}
+    .pill text{fill:var(--c);font-size:16px;font-weight:600}
+  </style>
+  <defs>
+    <radialGradient id="star" cx="45%" cy="42%" r="60%">
+      <stop offset="0" stop-color="#fff1c9"/>
+      <stop offset=".55" stop-color="#ffc35c"/>
+      <stop offset="1" stop-color="#ee7d2c"/>
+    </radialGradient>
+  </defs>
+
+  <rect class="bg" width="1200" height="320" rx="18"/>
+
+  <text class="ink" x="56" y="104" font-size="46" font-weight="700">Grounded Learning Wiki</text>
+  <text class="muted" x="56" y="146" font-size="20">An LLM Wiki that asks before it answers, never invents a number,</text>
+  <text class="muted" x="56" y="174" font-size="20">and teaches its owner as it grows.</text>
+
+  <g class="pill resolve"><rect x="56" y="208" width="100" height="36" rx="18"/><text class="mono" x="106" y="232" text-anchor="middle">resolve</text></g>
+  <g class="pill seek"><rect x="168" y="208" width="72" height="36" rx="18"/><text class="mono" x="204" y="232" text-anchor="middle">seek</text></g>
+  <g class="pill verify"><rect x="252" y="208" width="92" height="36" rx="18"/><text class="mono" x="298" y="232" text-anchor="middle">verify</text></g>
+  <g class="pill you"><rect x="356" y="208" width="140" height="36" rx="18"/><text class="mono" x="426" y="232" text-anchor="middle">learn (you)</text></g>
+  <g class="pill wiki"><rect x="508" y="208" width="188" height="36" rx="18"/><text class="mono" x="602" y="232" text-anchor="middle">learn (the wiki)</text></g>
+
+  <text class="muted" x="56" y="284" font-size="15">An extension to Karpathy's LLM Wiki pattern · idea file + Claude Code skill + standard-library checker</text>
+
+  <!-- star, orbit and a planet in transit -->
+  <ellipse class="orbit" cx="962" cy="128" rx="150" ry="26" fill="none" stroke-width="1.5" stroke-dasharray="5 6"/>
+  <circle cx="962" cy="128" r="70" fill="url(#star)"/>
+  <circle class="planet" cx="930" cy="150" r="11"/>
+
+  <!-- its light curve -->
+  <path class="curve" d="M800 230 H918 C926 230 928 250 936 250 H988 C996 250 998 230 1006 230 H1124" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+  <text class="muted" x="962" y="276" font-size="14" text-anchor="middle">brightness dips as the planet crosses</text>
+</svg>

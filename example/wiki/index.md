@@ -1,15 +1,16 @@
 # Index
 
 ## Entities
-- [[t55-flour]]: refined white flour
-- [[t65-flour]]: country-loaf flour
-- [[house-loaf]]: the everyday loaf (versioned)
+- [[trappist-1e]], [[trappist-1f]]: rocky planets of a red dwarf
+- [[kepler-452b]]: a planet of a Sun-like star
+- [[pipeline]]: the light-curve pipeline (versioned)
 
 ## Concepts
-- [[levain]]: the sourdough culture
+- [[transit-method]]: finding planets by the dips they cause
+- [[habitable-zone]]: where liquid water could last
 
 ## Learning
 - [[curriculum]], [[glossary]]
 
 ## Open gaps
-- [[ash-content-flour-t110]]
+- [[hot-jupiter]]
