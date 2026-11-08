@@ -1,0 +1,10 @@
+# Policy for the sourdough example wiki.
+
+[resolve.synonyms]
+"sour dough" = "sourdough"
+
+[seek]
+policy = "queue"            # auto | queue | off
+research_after_days = 7
+stale_after_days = 180
+trusted_hosts = []
