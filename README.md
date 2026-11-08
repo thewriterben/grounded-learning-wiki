@@ -62,7 +62,7 @@ flowchart TD
   M -- "several pages, different names" --> RA["resolved: all of them"]
   M -- "two pages, same words" --> AB["needs_clarification: which one?"]
   M -- "part of a name, or a near identifier" --> OF["needs_clarification: offer the closest"]
-  M -- "no page, unknown words" --> G["gap: file it, then seek"]
+  M -- "no page matches" --> G["gap: file it, then seek"]
   V -- "no" --> R["resolved"]
   V -- "yes, version named" --> R
   V -- "yes, no version named" --> AV["needs_clarification: which version?"]
@@ -129,7 +129,7 @@ There is also a [curriculum](example/wiki/learning/curriculum.md).
    ```
 
 2. Put a `glw.toml` at the root of your wiki. Copy [`example/glw.toml`](example/glw.toml) and edit the
-   synonyms and the seek policy.
+   synonyms and the seek policy. Then lock your sources: `python path/to/glw.py lock --root .`
 3. Ask Claude Code questions about your wiki. The skill runs `resolve` before it answers and `check`
    after it edits. For other agents, give them [`IDEA.md`](IDEA.md).
 4. Optionally, make the checker a gate in CI or pre-commit:
@@ -143,7 +143,8 @@ There is also a [curriculum](example/wiki/learning/curriculum.md).
 
 | Command | Does |
 |---|---|
-| `check [--strict]` | Checks that citations resolve and quotes are verbatim, that cited lines carry only quoted numbers, and the one-way rules and dangling links. Flags uncited numbers (errors with `--strict`). |
+| `check [--strict]` | Checks that `raw/` matches `glw.lock`, that citations resolve and quotes are verbatim (three words or more), that cited lines carry only quoted numbers, that numbers on learning pages are on the page they link, and the one-way rules and dangling links. Warns when a quote names another page's subject. Flags uncited numbers and unlocked sources (errors with `--strict`). |
+| `lock [--accept-changes]` | Records a hash of every file in `raw/` in `glw.lock`. Refuses changed or removed sources unless the owner passes `--accept-changes`. |
 | `resolve [--record-gap] -- "<question>"` | Returns JSON with `resolved`, `needs_clarification` or `gap`, plus corrections and what to ask. |
 | `gaps` | Lists open gaps and marks the ones due for a search. |
 | `learn-status [--strict]` | Lists days in the log with no daily guide or session note. |
@@ -155,6 +156,7 @@ Every command takes `--root <wiki>`. Tests: `python -m unittest discover -s test
 
 ```
 glw.toml                 policy: synonyms, seek policy, intervals
+glw.lock                 sha256 of every file in raw/ (glw.py lock)
 raw/                     immutable sources
 wiki/
   index.md  log.md       as in the base pattern
@@ -166,8 +168,10 @@ wiki/
 
 ## Limits
 
-- The quote check catches numbers that were invented or altered. It does not catch a true number
-  attached to the wrong subject. That is the main error left.
+- The quote check catches numbers that were invented or altered, and the lock catches a source edited
+  to match. A true number on the wrong subject is only partly caught: a quote that names another
+  page's subject warns, but a right-subject quote used for the wrong attribute passes. That is the
+  main error left.
 - resolve works on words, not meaning. The synonyms and the proposals gate are how it learns your
   vocabulary.
 - Nothing here judges whether a source is any good.

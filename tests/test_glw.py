@@ -2,7 +2,9 @@
 import contextlib
 import io
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,7 +12,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 EXAMPLE = HERE.parent / "example"
-sys.path.insert(0, str(HERE.parent / "skill" / "grounded-learning-wiki"))
+GLW = HERE.parent / "skill" / "grounded-learning-wiki" / "glw.py"
+sys.path.insert(0, str(GLW.parent))
 import glw  # noqa: E402
 
 
@@ -162,6 +165,36 @@ class Example(unittest.TestCase):
         self.assertEqual(glw.unquote('Read "a" as "b"'), 'Read "a" as "b"')
         self.assertEqual(glw.unquote('"plain"'), "plain")
 
+    def test_number_extractor_reads_units_signs_and_notation(self):
+        cases = {"about 40km away": ["40"], "radius 0.92R": ["0.92"], "delta -0.92": ["-0.92"],
+                 "delta −0.92": ["-0.92"], "about 1.2e5 K": ["1.2e5"], "1,000 stars": ["1000"]}
+        for text, want in cases.items():
+            self.assertEqual(glw.numbers_in(text), want, text)
+
+    def test_digits_of_names_never_back_a_number(self):
+        self.assertFalse(glw.number_in_quote("1", "TRAPPIST-1e has a radius"))
+        self.assertFalse(glw.number_in_quote("452", "Kepler-452b is a planet"))
+        self.assertEqual(glw.numbers_in("trappist 1e radius 0.92", frozenset({"1e"})), ["0.92"])
+
+    def test_words_known_but_no_page_named_is_offered(self):
+        r = resolve(EXAMPLE, "What is a transit?")
+        self.assertEqual(r["status"], "needs_clarification")
+        self.assertIsNone(r["entity"])
+        self.assertIn("Transit method", r["offered"])
+
+    def test_no_page_about_it_is_a_gap(self):
+        r = resolve(EXAMPLE, "What is the radius of the star?")
+        self.assertEqual(r["status"], "gap")
+        self.assertEqual(r["unknown_terms"], [])
+        self.assertEqual(r["reason"], "no page is about this")
+
+    def test_non_ascii_output_survives_a_cp1252_console(self):
+        env = dict(os.environ, PYTHONIOENCODING="cp1252")
+        p = subprocess.run([sys.executable, str(GLW), "resolve", "--root", str(EXAMPLE), "--",
+                            "TRAPPIST‑1e — radius?"], capture_output=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr.decode("utf-8", "replace"))
+        self.assertIn("—", json.loads(p.stdout.decode("utf-8"))["question"])
+
 
 class BrokenCopies(unittest.TestCase):
     def check(self, root, *flags):
@@ -223,6 +256,73 @@ class BrokenCopies(unittest.TestCase):
             code, out = run("learn-status", "--root", root, "--strict")
             self.assertEqual(code, 1)
             self.assertIn("MISSING learning page for 2026-11-08", out)
+
+    def test_raw_edited_to_match_the_wiki_fails(self):
+        with Copy() as root:
+            for page in ("raw/trappist-1-note.md", "wiki/entities/trappist-1e.md"):
+                self.edit(root / page, "0.92", "0.95")
+            code, out = self.check(root)
+            self.assertEqual(code, 1)
+            self.assertIn("raw/trappist-1-note.md: changed since it was locked", out)
+            code, out = run("lock", "--root", root)
+            self.assertEqual(code, 1)
+            self.assertIn("refused", out)
+
+    def test_new_source_must_be_locked(self):
+        with Copy() as root:
+            (root / "raw/new-note.md").write_text("A new note.\n", encoding="utf-8")
+            code, out = self.check(root)
+            self.assertEqual(code, 0)
+            self.assertIn("raw/new-note.md: new source not in glw.lock", out)
+            self.assertEqual(self.check(root, "--strict")[0], 1)
+            self.assertEqual(run("lock", "--root", root)[0], 0)
+            self.assertEqual(self.check(root, "--strict")[0], 0)
+
+    def test_quote_about_another_subject_warns(self):
+        with Copy() as root:
+            src = (root / "raw/trappist-1-note.md").read_text(encoding="utf-8")
+            quote = glw.re.search(r"TRAPPIST-1f[^\n]*?1\.04", src).group(0)
+            append(root / "wiki/entities/trappist-1e.md",
+                   f'\nRadius 1.04.[^z]\n\n[^z]: raw/trappist-1-note.md "{quote}"\n')
+            code, out = self.check(root, "--strict")
+            self.assertEqual(code, 0)  # a warning, never an error: a page may compare neighbours
+            self.assertIn("quote names TRAPPIST-1f but not this page's subject", out)
+
+    def test_number_only_quote_fails(self):
+        with Copy() as root:
+            append(root / "wiki/entities/trappist-1e.md",
+                   '\nMass 0.92.[^z]\n\n[^z]: raw/trappist-1-note.md "0.92"\n')
+            code, out = self.check(root)
+            self.assertEqual(code, 1)
+            self.assertIn("quote is too short", out)
+
+    def test_learning_number_must_be_on_the_linked_page(self):
+        with Copy() as root:
+            append(root / "wiki/learning/glossary.md",
+                   "\n- Radius of TRAPPIST-1e: 0.95 Earth radii, see [[trappist-1e]].\n")
+            code, out = self.check(root)
+            self.assertEqual(code, 1)
+            self.assertIn("0.95 is not on the page this line links (trappist-1e)", out)
+
+    def test_external_quote_is_still_checked_for_numbers(self):
+        with Copy() as root:
+            append(root / "wiki/entities/trappist-1e.md",
+                   '\nMass 9.99.[^z]\n\n[^z]: doi:10.1/x "the mass is 1.00"\n')
+            code, out = self.check(root)
+            self.assertEqual(code, 1)
+            self.assertIn("9.99 is not in any quote", out)
+
+    def test_glued_units_and_signs(self):
+        with Copy() as root:
+            append(root / "wiki/entities/trappist-1e.md",
+                   '\nRadius 0.92R.[^z]\n\nDelta -0.92.[^z]\n\n'
+                   '[^z]: raw/trappist-1-note.md "TRAPPIST-1e has a radius of about 0.92"\n'
+                   "\nIt is about 40km away.\n")
+            code, out = self.check(root, "--strict")
+            self.assertEqual(code, 1)
+            self.assertNotIn(": 0.92 is not", out)  # 0.92R reads as 0.92, which the quote holds
+            self.assertIn("-0.92 is not in any quote", out)
+            self.assertIn("uncited number(s) 40", out)
 
     def test_repeat_of_rejected_proposal_flagged(self):
         with Copy() as root:

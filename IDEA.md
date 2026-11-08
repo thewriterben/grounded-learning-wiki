@@ -74,17 +74,25 @@ stale.
 1. **Claims cite raw sources with a quote.** A citation is a footnote naming a file under `raw/` (or an
    external form such as `doi:`) followed by the exact words it relies on:
    `[^e]: raw/trappist-1-note.md "TRAPPIST-1e has a radius of about 0.92 Earth radii"`.
-   The quote must appear in the file, word for word (whitespace aside).
+   The quote must appear in the file, word for word (whitespace aside), and be at least three words
+   long, enough to say what the value belongs to. Quote the subject's name with the value.
 2. **The model never produces a number.** Every number on a line that cites a source must appear in
-   one of that line's quotes. Extract by rule first (tables, `Key: value` lines); use the model only to
+   one of that line's quotes (an external citation's quote counts too). Extract by rule first (tables, `Key: value` lines); use the model only to
    map or phrase, never to supply a value. A number with no citation at all is flagged.
 3. **Agreement, supersession, conflict.** A second source with the same value is added as a second
    citation. A newer source that changes a value strikes the old line inline
    (`~~old~~ *(superseded YYYY-MM-DD, see [^new])*`) rather than deleting it. Two sources that disagree
    are both kept and the page says so, dated.
 
-The checker enforces 1 and 2 mechanically. That turns "the checking is still on you" into a script
-that runs after every edit.
+4. **The sources do not move.** `raw/` is locked: `glw.py lock` records a hash of every source in
+   `glw.lock`, and `check` fails when a locked source changes or disappears, so a source cannot be
+   edited to agree with the wiki. A new source warns until it is locked (an error with `--strict`), so
+   it shows up in review. Only the owner accepts a changed source (`lock --accept-changes`).
+
+The checker enforces 1, 2 and 4 mechanically. It also warns when a quote names another page's subject
+and not this page's (a neighbour's value on the wrong page), and it holds learning pages to the wiki:
+a number on a learning line must appear on a wiki page that line links. That turns "the checking is
+still on you" into a script that runs after every edit.
 
 ### 4. learn (you): the wiki teaches its owner
 
@@ -153,7 +161,8 @@ wiki/
 
 | Command | Does |
 |---|---|
-| `check` | citations resolve, quotes are verbatim, cited lines carry only quoted numbers, uncited numbers flagged, the one-way rules, dangling links |
+| `check` | raw/ matches `glw.lock`; citations resolve, quotes are verbatim and at least three words, cited lines carry only quoted numbers, uncited numbers flagged, learning numbers are on the linked page, quotes about another subject warned, the one-way rules, dangling links |
+| `lock [--accept-changes]` | records the hash of every file in `raw/` in `glw.lock`; refuses changed or removed files unless the owner accepts them |
 | `resolve "<question>"` | the resolve rules above; JSON out: `resolved`, `needs_clarification` or `gap`, with corrections and what to ask; `--record-gap` files the gap |
 | `gaps` | gaps and which are due for a search |
 | `learn-status` | days in the log with no daily guide or session summary |
@@ -169,8 +178,11 @@ correctly in a hand-graded sample, and model extraction of prose about 70%, whic
 held to quoted values. The samples were small (50 claims, 30 retrieval questions) and written by the
 builders. Treat the numbers as a reason to measure your own, not as a benchmark.
 
-The quote check catches invented and altered numbers. It does not catch a true number attached to the
-wrong subject, which is the main remaining error, and it does not judge whether a source is any good.
+The quote check catches invented and altered numbers, and the lock stops a source being edited to
+match. A true number attached to the wrong subject is only partly caught: the checker warns when the
+quote names a different page's subject, but not when the quote is about the right subject and the
+wrong attribute (a mass quoted as a radius). That is the main remaining error. Nothing here judges
+whether a source is any good.
 
 ## Credits
 

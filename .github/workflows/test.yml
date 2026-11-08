@@ -9,9 +9,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +23,7 @@ jobs:
       - name: Unit tests
         run: python -m unittest discover -s tests -q
       - name: Example wiki passes its own checks
+        shell: bash
         run: |
           python skill/grounded-learning-wiki/glw.py check --root example --strict
           python skill/grounded-learning-wiki/glw.py learn-status --root example --strict
