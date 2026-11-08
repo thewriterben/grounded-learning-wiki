@@ -132,32 +132,51 @@ There is also a [curriculum](example/wiki/learning/curriculum.md).
    synonyms and the seek policy. Then lock your sources: `python path/to/glw.py lock --root .`
 3. Ask Claude Code questions about your wiki. The skill runs `resolve` before it answers and `check`
    after it edits. For other agents, give them [`IDEA.md`](IDEA.md).
-4. Optionally, make the checker a gate in CI or pre-commit:
+4. Optionally, make the checker a gate. `pip install git+https://github.com/thewriterben/grounded-learning-wiki`
+   gives you a `glw` command. In GitHub Actions, `--format github` puts each finding on the line of
+   the pull request it is about:
 
    ```yaml
-   - run: python path/to/glw.py check --root . --strict
+   - run: python path/to/glw.py check --root . --strict --format github
    - run: python path/to/glw.py learn-status --root . --strict
+   ```
+
+   With [pre-commit](https://pre-commit.com), add this to `.pre-commit-config.yaml` (pin `rev` to a
+   tag or commit):
+
+   ```yaml
+   repos:
+     - repo: https://github.com/thewriterben/grounded-learning-wiki
+       rev: main
+       hooks:
+         - id: glw-check
+           args: [--root, ., --strict]
    ```
 
 ### Checker commands
 
 | Command | Does |
 |---|---|
-| `check [--strict]` | Checks that `raw/` matches `glw.lock`, that citations resolve and quotes are verbatim (three words or more, one per footnote), that each cited claim (a paragraph, list item or table row) carries only quoted numbers, that a struck-out superseded value matches its own footnote, that numbers on learning pages are on the page they link, and the one-way rules and dangling links. Warns when a quote names another page's subject and when a page is an orphan. Flags uncited numbers and unlocked sources (errors with `--strict`). Skips fenced code. |
+| `check [--strict] [--format text\|json\|github]` | Checks that `raw/` matches `glw.lock` and that each source says where it came from (frontmatter `source:` and, for a URL, `retrieved:`), that citations resolve and quotes are verbatim (three words or more, one per footnote), that each cited claim (a paragraph, list item or table row) carries only quoted numbers, that a struck-out superseded value matches its own footnote, that numbers on learning pages are on the page they link, and the one-way rules and dangling links. Warns when a quote names another page's subject and when a page is an orphan. Flags uncited numbers and unlocked sources (errors with `--strict`). Skips fenced code. |
 | `lock [--accept-changes]` | Records a hash of every file in `raw/` in `glw.lock`. Refuses changed or removed sources unless the owner passes `--accept-changes`. |
 | `resolve [--record-gap] -- "<question>"` | Returns JSON with `resolved`, `needs_clarification` or `gap`, plus corrections, what to ask, and the bare numbers in the question. |
 | `gaps` | Lists open gaps, marks the ones due for a search (none under policy `off`), marks those a newer page may answer, and prints the trusted hosts. |
 | `learn-status [--strict]` | Lists days in the log with no daily guide or session note. |
 | `proposals` | Lists pending proposals and approved ones still to apply, and flags repeats of rejected ones. |
+| `cards [--out FILE]` | Exports the self-check questions on learning pages as a CSV that Anki imports: question, answer with the wiki page it rests on, tags. |
+| `eval [--dir DIR]` | Runs the wiki's own test cases from `eval/questions.jsonl` (a question and the status resolve should give) and `eval/claims.jsonl` (an edit and whether check should catch it). Prints resolve accuracy and check's precision and recall. The example's cases are in [`example/eval/`](example/eval/). |
 
-Every command takes `--root <wiki>`. Tests: `python -m unittest discover -s tests -q`.
+Every command takes `--root <wiki>`. `check --format json` gives agents and tools the findings as
+`{"pages", "errors": [{"file", "line", "message"}], "warnings": [...]}`. Tests:
+`python -m unittest discover -s tests -q`.
 
 ## Layout
 
 ```
 glw.toml                 policy: synonyms, seek policy, intervals
 glw.lock                 sha256 of every file in raw/ (glw.py lock)
-raw/                     immutable sources
+raw/                     immutable sources; frontmatter source:, retrieved:, question:
+eval/                    questions.jsonl, claims.jsonl (glw.py eval)
 wiki/
   index.md  log.md       as in the base pattern
   entities/ concepts/    pages; frontmatter: title, aliases, versioned + versions
@@ -176,7 +195,8 @@ wiki/
   its quotes. Keep one fact per list item where it matters.
 - resolve works on words, not meaning. The synonyms and the proposals gate are how it learns your
   vocabulary.
-- Nothing here judges whether a source is any good.
+- Nothing here judges whether a source is any good. `check` asks each one to say where it came from,
+  but reads frontmatter only in Markdown sources; a PDF or CSV in `raw/` is locked but not asked.
 - The evidence behind the rules comes from small samples written by the builders. See
   [IDEA.md](IDEA.md#evidence-and-limits).
 

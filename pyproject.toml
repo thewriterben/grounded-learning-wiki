@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grounded-learning-wiki"
+version = "0.1.0"
+description = "Checker for a Grounded Learning Wiki: an LLM Wiki that asks before it answers and never invents a number"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/thewriterben/grounded-learning-wiki"
+
+[project.scripts]
+glw = "glw:main"
+
+[tool.setuptools]
+py-modules = ["glw"]
+package-dir = { "" = "skill/grounded-learning-wiki" }

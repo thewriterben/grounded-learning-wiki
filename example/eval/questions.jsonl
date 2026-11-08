@@ -1,0 +1,16 @@
+{"q": "What is the radius of TRAPPIST-1e?", "status": "resolved", "entity": "wiki/entities/trappist-1e.md"}
+{"q": "What is the radius of TRAPPIST-1g?", "status": "needs_clarification"}
+{"q": "How does the trnasit method work?", "status": "resolved", "entity": "wiki/concepts/transit-method.md"}
+{"q": "How many candidates does the light-curve pipeline flag?", "status": "needs_clarification"}
+{"q": "What threshold does light-curve pipeline v2 use?", "status": "resolved", "entity": "wiki/entities/pipeline.md"}
+{"q": "How many candidates does the pipeline flag?", "status": "needs_clarification"}
+{"q": "What is a hot Jupiter?", "status": "gap"}
+{"q": "Kepler 452 b period", "status": "resolved", "entity": "wiki/entities/kepler-452b.md"}
+{"q": "TRAPPIST1e radius", "status": "resolved", "entity": "wiki/entities/trappist-1e.md"}
+{"q": "What is a transit?", "status": "needs_clarification"}
+{"q": "How many planets orbit TRAPPIST-1?", "status": "needs_clarification"}
+{"q": "Compare TRAPPIST-1e and TRAPPIST-1f", "status": "resolved", "entities": ["wiki/entities/trappist-1e.md", "wiki/entities/trappist-1f.md"]}
+{"q": "habitable zones", "status": "resolved", "entity": "wiki/concepts/habitable-zone.md"}
+{"q": "What is the goldilocks zone?", "status": "needs_clarification"}
+{"q": "tidal locking", "status": "gap"}
+{"q": "What is transit photometry?", "status": "resolved", "entity": "wiki/concepts/transit-method.md"}
