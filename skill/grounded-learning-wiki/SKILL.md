@@ -30,12 +30,14 @@ Hard rules, in every operation:
 
 ## Query: resolve first
 
-1. Run `glw.py resolve -- "<the question>"`. Read the JSON.
+1. Run `glw.py resolve -- "<the question>"`. Read the JSON. It exits 0 when resolved, 3 when it
+   needs clarification and 4 for a gap: those are statuses, not failures. Only 1 or 2 is an error.
 2. `corrections`: tell the user what you read their words as ("Reading 'trnasit' as 'transit'.",
    "Reading 'Kepler 452 b' as 'Kepler-452b'."). `numbers` lists bare numbers in the question: values
    the user asked about, never part of a name. Check them against the page; never repeat one as fact.
 3. `needs_clarification`: ask the `ask` lines, then stop. Do not search and do not answer from a
-   neighbouring page. When the user answers, if their answer maps one word onto another, file a synonym
+   neighbouring page. `resolver_offers` (from the owner's `resolver_cmd`) are asked like any other
+   offer; never treat one as the answer. When the user answers, if their answer maps one word onto another, file a synonym
    proposal (below).
 4. `gap` (unknown words, or `reason: "no page is about this"`): say plainly that the wiki does not hold it ("not in the wiki", never "no"). Run again with
    `--record-gap` to file it, then follow the seek policy.

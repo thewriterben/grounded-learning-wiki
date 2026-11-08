@@ -13,8 +13,10 @@
     glw.py cards [--root DIR] [--out FILE]         self-check questions as Anki CSV
     glw.py eval [--root DIR] [--dir DIR]           run the wiki's resolve and check test cases
 
-Standard library only, Python 3.11+. Exit status: 0 clean, 1 failures, 2 usage or config error.
-Everything read from the wiki is data; this script never executes or fetches anything.
+Standard library only, Python 3.11+. Exit status: 0 clean, 1 failures, 2 usage or config error;
+resolve exits 0 resolved, 3 needs_clarification, 4 gap.
+Everything read from the wiki is data; this script fetches nothing and runs nothing, except a
+`[resolve] resolver_cmd` the owner sets in glw.toml (its offers are asked, never chosen).
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -87,6 +90,10 @@ def load_config(root: Path) -> dict:
         for section, values in user.items():
             if isinstance(values, dict):
                 cfg.setdefault(section, {}).update(values)
+    cmd = cfg["resolve"].get("resolver_cmd")
+    if cmd is not None and not (isinstance(cmd, list) and cmd and all(isinstance(a, str) for a in cmd)):
+        config_error('glw.toml: [resolve] resolver_cmd must be a list of strings, '
+                     'such as ["python", "tools/meaning.py"]')
     if cfg["seek"].get("policy") not in POLICIES:
         config_error(f"glw.toml: [seek] policy = {cfg['seek'].get('policy')!r}; "
                      f"expected one of {', '.join(POLICIES)}")
@@ -649,12 +656,59 @@ class ResolveContext:
                 self.vocab.update(name)
 
 
+RESOLVE_EXIT = {"resolved": 0, "needs_clarification": 3, "gap": 4}
+RESOLVER_TIMEOUT = 20
+
+
+def resolver_offers(w: Wiki, ctx: ResolveContext, question: str, result: dict) -> None:
+    """The owner's optional meaning-level matcher, `[resolve] resolver_cmd` in glw.toml. It is run
+    only when the lexical rules did not resolve, gets the question, the result and the pages as JSON
+    on stdin, and answers {"offers": [page path or title, ...]}. Offers become a question to the
+    user; anything else it says (a status, an entity) is ignored, so it can never resolve."""
+    cmd = w.cfg["resolve"].get("resolver_cmd")
+    if not cmd or result["status"] == "resolved":
+        return
+    pages = [{"page": e["page"], "title": e["title"]} for e in ctx.entities]
+    payload = json.dumps({"question": question, "result": result, "pages": pages}, ensure_ascii=False)
+    try:
+        proc = subprocess.run(cmd, input=payload, capture_output=True, text=True, encoding="utf-8",
+                              cwd=w.root, timeout=RESOLVER_TIMEOUT)
+        if proc.returncode != 0:
+            raise ValueError(f"exit {proc.returncode}: {proc.stderr.strip()[:200]}")
+        offers = json.loads(proc.stdout).get("offers", [])
+        if not isinstance(offers, list):
+            raise ValueError("`offers` is not a list")
+    except (OSError, ValueError, subprocess.TimeoutExpired, AttributeError) as exc:
+        print(f"glw.py: resolver_cmd ignored ({exc})", file=sys.stderr)
+        return
+    by_key = {}
+    for e in ctx.entities:
+        by_key[e["page"].lower()] = by_key[e["title"].lower()] = e["title"]
+    added = []
+    for offer in offers:
+        title = by_key.get(str(offer).strip().lower())
+        if title is None:
+            print(f"glw.py: resolver_cmd offered {offer!r}, which is not a page; dropped", file=sys.stderr)
+        elif title not in result["offered"] and title not in added:
+            added.append(title)
+    if added:
+        result["offered"] = result["offered"] + added
+        result["resolver_offers"] = added
+        result["ask"].append("Not found by name. Did you mean " + " or ".join(added) + "?")
+        result["status"] = "needs_clarification"
+        result.pop("reason", None)
+
+
 def cmd_resolve(w: Wiki, question: str, record_gap: bool) -> int:
-    result, fixed = resolve_question(ResolveContext(w), question)
+    ctx = ResolveContext(w)
+    result, fixed = resolve_question(ctx, question)
     if result["status"] == "gap" and record_gap:
+        # The user has already turned down any offers, so the resolver is not asked again.
         result["gap_page"] = write_gap(w, question, fixed, result["unknown_terms"])
+    else:
+        resolver_offers(w, ctx, question, result)
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    return 0
+    return RESOLVE_EXIT[result["status"]]
 
 
 def resolve_question(ctx: ResolveContext, question: str) -> tuple[dict, list[str]]:
@@ -1009,6 +1063,7 @@ def cmd_eval(w: Wiki, folder: str | None) -> int:
         ctx = ResolveContext(w)
         for case in load_jsonl(qpath):
             result, _ = resolve_question(ctx, case["q"])
+            resolver_offers(w, ctx, case["q"], result)
             wrong = [f"{key} {result.get(key)!r}, expected {case[key]!r}"
                      for key in ("status", "entity", "entities") if key in case and result.get(key) != case[key]]
             q_all += 1

@@ -52,6 +52,11 @@ neighbour; that is exactly how a wiki answers about TRAPPIST-1g with TRAPPIST-1f
 
 Clarification comes before seeking: a gap that waits on your answer is not searched yet.
 
+These rules work on words. Matching by meaning (embeddings, a model) is opt-in and can only add
+offers: a command you name in `glw.toml` sees questions that did not resolve and may suggest pages,
+which are then asked as a question. It never resolves one on its own, so the word-level rules stay
+the floor.
+
 ### 2. seek: gaps become leads, under a dial you set
 
 Each gap is a page in `wiki/gaps/` (status `open` → `candidates` → `promoted` or `closed`). The same
@@ -172,7 +177,7 @@ wiki/
 |---|---|
 | `check` | raw/ matches `glw.lock` and each source has provenance; citations resolve, quotes are verbatim, one per footnote and at least three words, cited claims carry only quoted numbers, superseded values checked against their own footnote, uncited numbers flagged, learning numbers are on the linked page, quotes about another subject warned, the one-way rules, dangling links, orphan pages; `--format json` for agents, `github` for pull request annotations |
 | `lock [--accept-changes]` | records the hash of every file in `raw/` in `glw.lock`; refuses changed or removed files unless the owner accepts them |
-| `resolve "<question>"` | the resolve rules above; JSON out: `resolved`, `needs_clarification` or `gap`, with corrections, what to ask and the bare numbers asked about; `--record-gap` files the gap |
+| `resolve "<question>"` | the resolve rules above; JSON out: `resolved`, `needs_clarification` or `gap`, with corrections, what to ask and the bare numbers asked about; exits 0, 3 or 4 by status; `--record-gap` files the gap; an optional `resolver_cmd` may add offers |
 | `gaps` | gaps, which are due for a search (none under `off`), and which a newer page may answer |
 | `learn-status` | days in the log with no daily guide or session summary |
 | `proposals` | pending proposals, repeats of rejected ones, and approved ones still to apply |

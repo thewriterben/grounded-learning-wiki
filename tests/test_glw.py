@@ -557,5 +557,82 @@ class Additions(unittest.TestCase):
         self.assertTrue(callable(getattr(glw, func)))
 
 
+RESOLVER = '''import json, pathlib, sys
+data = json.load(sys.stdin)
+pathlib.Path("called.txt").write_text(data["question"], encoding="utf-8")
+print(json.dumps(%s))
+'''
+
+
+class ResolveExitAndHook(unittest.TestCase):
+    """resolve exit codes by status, and the owner's resolver_cmd that may only add offers."""
+
+    def setup_resolver(self, root, reply, cmd=None):
+        (root / "resolver.py").write_text(RESOLVER % repr(reply), encoding="utf-8")
+        cmd = cmd or [sys.executable, "resolver.py"]
+        append(root / "glw.toml", "\n" if "[resolve]" in (root / "glw.toml").read_text(encoding="utf-8") else "\n[resolve]\n")
+        toml = (root / "glw.toml").read_text(encoding="utf-8")
+        toml = toml.replace("[resolve]\n", "[resolve]\nresolver_cmd = " + json.dumps(cmd) + "\n", 1)
+        (root / "glw.toml").write_text(toml, encoding="utf-8")
+
+    def test_exit_code_follows_status(self):
+        self.assertEqual(run("resolve", "--root", EXAMPLE, "--", "What is the radius of TRAPPIST-1e?")[0], 0)
+        self.assertEqual(run("resolve", "--root", EXAMPLE, "--", "What is the radius of TRAPPIST-1g?")[0], 3)
+        self.assertEqual(run("resolve", "--root", EXAMPLE, "--", "tidal locking")[0], 4)
+
+    def test_resolver_offer_becomes_a_question(self):
+        with Copy() as root:
+            self.setup_resolver(root, {"offers": ["wiki/entities/kepler-452b.md", "Not A Page"]})
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code, out = run("resolve", "--root", root, "--", "tidal locking")
+            r = json.loads(out)
+            self.assertEqual(code, 3)
+            self.assertEqual(r["status"], "needs_clarification")
+            self.assertEqual(r["resolver_offers"], ["Kepler-452b"])
+            self.assertIsNone(r["entity"])
+            self.assertIn("Did you mean Kepler-452b?", r["ask"][-1])
+            self.assertIn("'Not A Page', which is not a page", err.getvalue())
+
+    def test_resolver_cannot_resolve(self):
+        with Copy() as root:
+            self.setup_resolver(root, {"status": "resolved", "entity": "wiki/entities/trappist-1e.md",
+                                       "entities": ["wiki/entities/trappist-1e.md"]})
+            code, out = run("resolve", "--root", root, "--", "What is the radius of TRAPPIST-1g?")
+            r = json.loads(out)
+            self.assertEqual((code, r["status"], r["entity"], r["entities"]), (3, "needs_clarification", None, []))
+
+    def test_resolver_not_run_when_resolved_or_recording(self):
+        with Copy() as root:
+            self.setup_resolver(root, {"offers": ["Kepler-452b"]})
+            self.assertEqual(run("resolve", "--root", root, "--", "What is the radius of TRAPPIST-1e?")[0], 0)
+            self.assertFalse((root / "called.txt").exists())
+            code, out = run("resolve", "--root", root, "--record-gap", "--", "tidal locking")
+            self.assertEqual(code, 4)
+            self.assertIn("gap_page", json.loads(out))
+            self.assertFalse((root / "called.txt").exists())
+
+    def test_broken_resolver_is_ignored(self):
+        with Copy() as root:
+            self.setup_resolver(root, {}, cmd=[sys.executable, "-c", "import sys; print('not json'); sys.exit(0)"])
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code, out = run("resolve", "--root", root, "--", "tidal locking")
+            self.assertEqual((code, json.loads(out)["status"]), (4, "gap"))
+            self.assertIn("resolver_cmd ignored", err.getvalue())
+
+    def test_resolver_cmd_must_be_a_list(self):
+        with Copy() as root:
+            self.setup_resolver(root, {})
+            toml = (root / "glw.toml").read_text(encoding="utf-8")
+            start = toml.index("resolver_cmd")
+            end = toml.index("\n", start)
+            (root / "glw.toml").write_text(toml[:start] + 'resolver_cmd = "python resolver.py"' + toml[end:],
+                                           encoding="utf-8")
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+                run("resolve", "--root", root, "--", "tidal locking")
+            self.assertEqual(cm.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

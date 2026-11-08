@@ -159,7 +159,7 @@ There is also a [curriculum](example/wiki/learning/curriculum.md).
 |---|---|
 | `check [--strict] [--format text\|json\|github]` | Checks that `raw/` matches `glw.lock` and that each source says where it came from (frontmatter `source:` and, for a URL, `retrieved:`), that citations resolve and quotes are verbatim (three words or more, one per footnote), that each cited claim (a paragraph, list item or table row) carries only quoted numbers, that a struck-out superseded value matches its own footnote, that numbers on learning pages are on the page they link, and the one-way rules and dangling links. Warns when a quote names another page's subject and when a page is an orphan. Flags uncited numbers and unlocked sources (errors with `--strict`). Skips fenced code. |
 | `lock [--accept-changes]` | Records a hash of every file in `raw/` in `glw.lock`. Refuses changed or removed sources unless the owner passes `--accept-changes`. |
-| `resolve [--record-gap] -- "<question>"` | Returns JSON with `resolved`, `needs_clarification` or `gap`, plus corrections, what to ask, and the bare numbers in the question. |
+| `resolve [--record-gap] -- "<question>"` | Returns JSON with `resolved`, `needs_clarification` or `gap`, plus corrections, what to ask, and the bare numbers in the question. Exits 0 when resolved, 3 when it needs clarification and 4 for a gap, so a script can branch without reading the JSON. |
 | `gaps` | Lists open gaps, marks the ones due for a search (none under policy `off`), marks those a newer page may answer, and prints the trusted hosts. |
 | `learn-status [--strict]` | Lists days in the log with no daily guide or session note. |
 | `proposals` | Lists pending proposals and approved ones still to apply, and flags repeats of rejected ones. |
@@ -194,7 +194,11 @@ wiki/
 - A claim is a whole paragraph or list item, so in a long paragraph a number may be backed by any of
   its quotes. Keep one fact per list item where it matters.
 - resolve works on words, not meaning. The synonyms and the proposals gate are how it learns your
-  vocabulary.
+  vocabulary. If you want meaning-level matching, set `resolver_cmd` under `[resolve]` in `glw.toml`
+  to a command (a list, such as `["python", "tools/meaning.py"]`). When a question is not resolved,
+  it gets the question, the result and the list of pages as JSON on stdin, and may print
+  `{"offers": ["<page or title>", ...]}`. Its offers are asked as a question, never chosen, so a gap
+  can become a clarification but never an answer. A failing command is ignored with a warning.
 - Nothing here judges whether a source is any good. `check` asks each one to say where it came from,
   but reads frontmatter only in Markdown sources; a PDF or CSV in `raw/` is locked but not asked.
 - The evidence behind the rules comes from small samples written by the builders. See
