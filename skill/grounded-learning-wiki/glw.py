@@ -49,12 +49,22 @@ NUMBER = re.compile(
     r"(?:(?<![\w.])(?P<sign>[-+−]))?(?<![\w.])(?<![A-Za-z]-)"
     r"(?P<int>\d{1,3}(?:,\d{3})+(?!\d)|\d+)(?P<frac>\.\d+)?"
     r"(?:[eE](?P<exp>[-+−]?\d+))?(?P<unit>[^\W\d_]*)(?!\w)")
+STRUCK = re.compile(r"~~(.+?)~~")
+LISTITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 MIN_QUOTE_WORDS = 3
 DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 TOKEN = re.compile(r"[a-z0-9]+")
 
 
+POLICIES = ("off", "queue", "auto")
+
+
 # ---------------------------------------------------------------- config and files
+
+def config_error(message: str) -> None:
+    print(f"glw.py: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
 
 def load_config(root: Path) -> dict:
     cfg = json.loads(json.dumps(DEFAULTS))
@@ -63,10 +73,13 @@ def load_config(root: Path) -> dict:
         try:
             user = tomllib.loads(path.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as exc:
-            sys.exit(f"glw.toml: {exc}")
+            config_error(f"glw.toml: {exc}")
         for section, values in user.items():
             if isinstance(values, dict):
                 cfg.setdefault(section, {}).update(values)
+    if cfg["seek"].get("policy") not in POLICIES:
+        config_error(f"glw.toml: [seek] policy = {cfg['seek'].get('policy')!r}; "
+                     f"expected one of {', '.join(POLICIES)}")
     return cfg
 
 
@@ -82,23 +95,34 @@ def unquote(value: str) -> str:
 
 
 def frontmatter(text: str) -> tuple[dict, int]:
-    """Minimal YAML subset: `key: value` and `key: [a, b]`. Returns (meta, first body line index)."""
+    """Minimal YAML subset: `key: value`, `key: [a, b]`, and `key:` followed by `- item` lines
+    (Obsidian's default for lists). Returns (meta, first body line index)."""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
         return {}, 0
     meta: dict = {}
+    block = None  # the key whose value is an empty `key:`, so `- item` lines belong to it
     for i in range(1, len(lines)):
         line = lines[i]
         if line.strip() == "---":
             return meta, i + 1
+        item = re.match(r"\s*-\s+(.*)$", line)
+        if item and block is not None:
+            if not isinstance(meta[block], list):
+                meta[block] = []
+            meta[block].append(unquote(item.group(1).split(" #", 1)[0].strip()))
+            continue
+        block = None
         if ":" not in line or line[:1] in (" ", "\t", "#"):
             continue
         key, value = line.split(":", 1)
-        value = value.split(" #", 1)[0].strip()
+        key, value = key.strip(), value.split(" #", 1)[0].strip()
         if value.startswith("[") and value.endswith("]"):
-            meta[key.strip()] = [unquote(v.strip()) for v in value[1:-1].split(",") if v.strip()]
+            meta[key] = [unquote(v.strip()) for v in value[1:-1].split(",") if v.strip()]
         else:
-            meta[key.strip()] = unquote(value)
+            meta[key] = unquote(value)
+            if value == "":
+                block = key
     return {}, 0
 
 
@@ -128,7 +152,7 @@ class Wiki:
         self.learning, self.gaps, self.proposals = root / p["learning"], root / p["gaps"], root / p["proposals"]
         self.lock = root / p["lock"]
         if not self.wiki.is_dir():
-            sys.exit(f"no wiki directory at {self.wiki}")
+            config_error(f"no wiki directory at {self.wiki}")
         self.pages = md_files(self.wiki)
         self.by_name: dict[str, list[Path]] = {}
         for page in self.pages:
@@ -194,9 +218,9 @@ def read_lock(w: Wiki) -> dict[str, str] | None:
     try:
         data = json.loads(read(w.lock))
     except json.JSONDecodeError as exc:
-        sys.exit(f"{w.lock.name}: {exc}")
+        config_error(f"{w.lock.name}: {exc}")
     if not isinstance(data, dict):
-        sys.exit(f"{w.lock.name}: expected a JSON object of path -> sha256")
+        config_error(f"{w.lock.name}: expected a JSON object of path -> sha256")
     return data
 
 
@@ -267,6 +291,7 @@ def cmd_check(w: Wiki, strict: bool) -> int:
         return any(set(n) <= have for n in names)
 
     check_lock(w, strict, errors, warnings)
+    linked: set[Path] = set()
 
     for page in w.pages:
         text = read(page)
@@ -287,6 +312,9 @@ def cmd_check(w: Wiki, strict: bool) -> int:
             qm = QUOTE.search(rest)
             quote = norm(qm.group(1)) if qm else None
             where = f"{rel}:{n}"
+            if len(QUOTE.findall(rest)) > 1:
+                warnings.append(f"{where}: [^{fid}] has more than one quoted span; only the first is "
+                                "checked (one quote per footnote, no straight double quotes inside it)")
             if quote is not None and len(quote.split()) < MIN_QUOTE_WORDS:
                 errors.append(f"{where}: [^{fid}] quote is too short to tie a value to its subject "
                               f"(at least {MIN_QUOTE_WORDS} words)")
@@ -327,16 +355,88 @@ def cmd_check(w: Wiki, strict: bool) -> int:
                     warnings.append(f"{where}: [^{fid}] quote names {', '.join(others)} but not this "
                                     "page's subject; check the value belongs here")
 
+        def judge(where: str, nums: list[str], refs: list[str], links: list[str]) -> None:
+            """The number cascade: cited quotes, else (learning) linked pages, else uncited."""
+            cited = [defs[f] for f in refs if f in defs]
+            quotes = [d["quote"] for d in cited if d["kind"] in ("raw", "external") and d["quote"]]
+            if quotes:
+                for num in nums:
+                    if not any(number_in_quote(num, q, idents) for q in quotes):
+                        errors.append(f"{where}: {num} is not in any quote this claim cites "
+                                      "(the model never produces a number)")
+            elif in_learning:
+                # A learning page re-explains: each number must be on a wiki page the claim points to.
+                targets = [hit for t in links
+                           if (hit := w.resolve_link(t)) and not inside(hit, w.learning)]
+                targets += [d["path"] for d in cited if d["kind"] == "wiki" and d["path"].is_file()
+                            and not inside(d["path"], w.learning)]
+                if targets:
+                    held = set().union(*(numbers_on(t) for t in targets))
+                    for num in nums:
+                        if num not in held:
+                            errors.append(f"{where}: {num} is not on the page this claim links "
+                                          f"({', '.join(sorted({t.stem for t in targets}))})")
+                else:
+                    (errors if strict else warnings).append(
+                        f"{where}: number(s) {', '.join(nums)} with no link to the wiki page that holds them")
+            elif refs:
+                if any(d["kind"] == "external" for d in cited):
+                    warnings.append(f"{where}: number(s) {', '.join(nums)} rest on an external citation "
+                                    "with no quote")
+                # citations of wiki pages or bad targets are already errors above
+            elif not w.is_derived_area(page):
+                (errors if strict else warnings).append(f"{where}: uncited number(s) {', '.join(nums)}")
+
+        # A claim is a block, not a line: a wrapped paragraph's footnote may sit on its last line.
+        # Blocks are runs of non-blank lines; a list item, table row, heading or footnote definition
+        # starts its own. Fenced code is skipped entirely.
+        body = list(enumerate(lines[start:], start + 1))
+        block_of: dict[int, int] = {}
+        fence = None
+        bid, prev_blank, block_starter = 0, True, False
+        for n, line in body:
+            s = line.strip()
+            if fence:
+                if s.startswith(fence):
+                    fence = None
+                prev_blank = True
+                continue
+            if s.startswith(("```", "~~~")):
+                fence = s[:3]
+                continue
+            if not s:
+                prev_blank = True
+                continue
+            own = s.startswith(("|", "#")) or FOOTDEF.match(line)
+            if prev_blank or own or LISTITEM.match(line) or block_starter:
+                bid += 1
+            block_of[n] = bid
+            block_starter = bool(own)
+            prev_blank = False
+        refs_in: dict[int, set[str]] = {}
+        links_in: dict[int, list[str]] = {}
+        for n, line in body:
+            if n in block_of and not FOOTDEF.match(line):
+                rest = STRUCK.sub(" ", line)  # refs inside ~~struck~~ text serve only that text
+                refs_in.setdefault(block_of[n], set()).update(FOOTREF.findall(rest))
+                links_in.setdefault(block_of[n], []).extend(WIKILINK.findall(rest))
+
         used: set[str] = set()
-        for n, line in enumerate(lines[start:], start + 1):
+        for n, line in body:
             where = f"{rel}:{n}"
-            if FOOTDEF.match(line):
+            if n not in block_of or FOOTDEF.match(line):
                 continue
             refs = FOOTREF.findall(line)
             used.update(refs)
             for fid in refs:
                 if fid not in defs:
                     errors.append(f"{where}: [^{fid}] has no definition")
+            for target in WIKILINK.findall(line):
+                if (hit := w.resolve_link(target)) and hit != page:
+                    linked.add(hit.resolve())
+            for target in MDLINK.findall(line):
+                if not target.startswith(prefixes):
+                    linked.add((page.parent / target.split("#", 1)[0]).resolve())
 
             # one-way rule 2: nothing outside learning/ links into it
             if not in_learning and not nav:
@@ -357,42 +457,21 @@ def cmd_check(w: Wiki, strict: bool) -> int:
             # numbers
             if nav or line.lstrip().startswith("#"):
                 continue
-            nums = numbers_in(line, idents)
-            if not nums:
-                continue
-            cited = [defs[f] for f in refs if f in defs]
-            quotes = [d["quote"] for d in cited if d["kind"] in ("raw", "external") and d["quote"]]
-            if quotes:
-                for num in nums:
-                    if not any(number_in_quote(num, q, idents) for q in quotes):
-                        errors.append(f"{where}: {num} is not in any quote this line cites "
-                                      "(the model never produces a number)")
-            elif in_learning:
-                # A learning page re-explains: each number must be on a wiki page the line points to.
-                targets = [hit for t in WIKILINK.findall(line)
-                           if (hit := w.resolve_link(t)) and not inside(hit, w.learning)]
-                targets += [d["path"] for d in cited if d["kind"] == "wiki" and d["path"].is_file()
-                            and not inside(d["path"], w.learning)]
-                if targets:
-                    held = set().union(*(numbers_on(t) for t in targets))
-                    for num in nums:
-                        if num not in held:
-                            errors.append(f"{where}: {num} is not on the page this line links "
-                                          f"({', '.join(sorted({t.stem for t in targets}))})")
-                else:
-                    (errors if strict else warnings).append(
-                        f"{where}: number(s) {', '.join(nums)} with no link to the wiki page that holds them")
-            elif refs:
-                if any(d["kind"] == "external" for d in cited):
-                    warnings.append(f"{where}: number(s) {', '.join(nums)} rest on an external citation "
-                                    "with no quote")
-                # citations of wiki pages or bad targets are already errors above
-            elif not w.is_derived_area(page):
-                (errors if strict else warnings).append(f"{where}: uncited number(s) {', '.join(nums)}")
+            # A superseded value, ~~old~~, is checked only against the citation kept inside it.
+            for span in STRUCK.findall(line):
+                if nums := numbers_in(span, idents):
+                    judge(where, nums, FOOTREF.findall(span), WIKILINK.findall(span))
+            if nums := numbers_in(STRUCK.sub(" ", line), idents):
+                judge(where, nums, sorted(refs_in[block_of[n]]), links_in[block_of[n]])
 
         for fid in defs:
             if fid not in used:
                 warnings.append(f"{rel}: footnote [^{fid}] is defined but never used")
+
+    # Orphans: the base pattern's lint. Navigation pages and the derived areas are reached otherwise.
+    for page in w.pages:
+        if not (w.is_navigation(page) or w.is_derived_area(page)) and page.resolve() not in linked:
+            warnings.append(f"{w.rel(page)}: orphan page; no other page links to it (add it to index.md)")
 
     for msg in warnings:
         print(f"WARN  {msg}")
@@ -451,7 +530,8 @@ def digit_neighbours(word: str, vocab: Counter) -> list[str]:
     letters, digits = re.sub(r"\d", "", word), re.sub(r"\D", "", word)
     out = []
     for v in vocab:
-        if v == word or not has_digit(v) or abs(len(v) - len(word)) > 1:
+        if (v == word or not has_digit(v) or not any(c.isalpha() for c in v)
+                or abs(len(v) - len(word)) > 1):
             continue
         v_letters, v_digits = re.sub(r"\d", "", v), re.sub(r"\D", "", v)
         if v_letters == letters or (v_digits == digits and letters and shape(v) == shape(word)):
@@ -483,27 +563,65 @@ def load_entities(w: Wiki) -> list[dict]:
     return entities
 
 
-def cmd_resolve(w: Wiki, question: str, record_gap: bool) -> int:
-    rcfg = w.cfg["resolve"]
-    stop = STOPWORDS | {s.lower() for s in rcfg.get("stopwords_extra", [])}
-    vocab: Counter = Counter()
-    for path in md_files(w.raw) + [p for p in w.pages if not (w.is_derived_area(p) or w.is_navigation(p))]:
-        vocab.update(tokens(read(path)))
-    entities = load_entities(w)
-    for e in entities:
-        for name in e["names"]:
-            vocab.update(name)
+class ResolveContext:
+    """What resolve reads from the wiki, built once (gaps re-resolves every open gap with it)."""
 
-    text = apply_synonyms(question, rcfg.get("synonyms", {}))
-    words = [t for t in text.split() if t not in stop]
+    def __init__(self, w: Wiki):
+        rcfg = w.cfg["resolve"]
+        self.stop = STOPWORDS | {s.lower() for s in rcfg.get("stopwords_extra", [])}
+        self.synonyms = rcfg.get("synonyms", {})
+        self.vocab: Counter = Counter()
+        for path in md_files(w.raw) + [p for p in w.pages
+                                       if not (w.is_derived_area(p) or w.is_navigation(p))]:
+            self.vocab.update(tokens(read(path)))
+        self.entities = load_entities(w)
+        for e in self.entities:
+            for name in e["names"]:
+                self.vocab.update(name)
+
+
+def cmd_resolve(w: Wiki, question: str, record_gap: bool) -> int:
+    result, fixed = resolve_question(ResolveContext(w), question)
+    if result["status"] == "gap" and record_gap:
+        result["gap_page"] = write_gap(w, question, fixed, result["unknown_terms"])
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
+def resolve_question(ctx: ResolveContext, question: str) -> tuple[dict, list[str]]:
+    vocab, entities = ctx.vocab, ctx.entities
+    text = apply_synonyms(question, ctx.synonyms)
+    words = [t for t in text.split() if t not in ctx.stop]
     result: dict = {"question": question, "corrections": [], "ask": [], "unknown_terms": [],
-                    "entity": None, "offered": []}
+                    "numbers": [], "entity": None, "offered": []}
+    # An identifier typed in two pieces ("Kepler 452 b"): join a pair whose join is a known identifier.
+    joined: list[str] = []
+    i = 0
+    while i < len(words):
+        a, b = words[i], words[i + 1] if i + 1 < len(words) else ""
+        if b and (a not in vocab or b not in vocab) and a + b in vocab and has_digit(a + b):
+            result["corrections"].append({"from": f"{a} {b}", "to": a + b})
+            joined.append(a + b)
+            i += 2
+        else:
+            joined.append(a)
+            i += 1
     fixed: list[str] = []
-    for word in words:
+    for word in joined:
         if word in vocab:
             fixed.append(word)
             continue
         if has_digit(word):
+            if not any(c.isalpha() for c in word):  # a bare number is a value, not an identifier
+                result["numbers"].append(word)
+                fixed.append(word)
+                continue
+            # An identifier typed without its hyphen ("TRAPPIST1e"): split where letters meet digits.
+            split = re.fullmatch(r"([a-z]+)(\d[a-z0-9]*)", word)
+            if split and split[1] in vocab and split[2] in vocab:
+                result["corrections"].append({"from": word, "to": f"{split[1]} {split[2]}"})
+                fixed.extend([split[1], split[2]])
+                continue
             near = digit_neighbours(word, vocab)
             result["unknown_terms"].append(word)
             if near:
@@ -588,23 +706,28 @@ def cmd_resolve(w: Wiki, question: str, record_gap: bool) -> int:
         # subject's page holds the asked fact is for the agent to read (and file as a gap if not).
         result["status"] = "resolved"
 
-    if result["status"] == "gap" and record_gap:
-        result["gap_page"] = write_gap(w, question, fixed)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    return 0
+    return result, fixed
 
 
-def write_gap(w: Wiki, question: str, words: list[str]) -> str:
-    slug = "-".join(sorted(set(words)))[:60].strip("-") or "gap"
-    path = w.gaps / f"{slug}.md"
+def write_gap(w: Wiki, question: str, words: list[str], unknown: list[str]) -> str:
+    """One page per gap, named from its words (unknown ones first) so two wordings share a page.
+    A name cut to length gets a short hash of all the words, so long questions do not collide."""
+    question = " ".join(question.split())
+    first = sorted(set(unknown) & set(words))
+    slug = "-".join(first + sorted(set(words) - set(first)))
+    if len(slug) > 50:
+        cut = slug[:51]
+        cut = cut.rsplit("-", 1)[0] if "-" in cut else cut[:50]
+        slug = cut + "-" + hashlib.sha1(" ".join(sorted(set(words))).encode()).hexdigest()[:6]
+    path = w.gaps / f"{slug or 'gap'}.md"
     if not path.exists():
         w.gaps.mkdir(parents=True, exist_ok=True)
         today = dt.date.today().isoformat()
         path.write_text(
             "---\n"
-            f"title: {question.strip().rstrip('?')}\n"
+            f"title: {question.rstrip('?')}\n"
             "status: open\n"
-            f"question: {question.strip()}\n"
+            f"question: {question}\n"
             f"asked: {today}\n"
             "last_searched:\n"
             f"policy: {w.cfg['seek']['policy']}\n"
@@ -622,17 +745,33 @@ def parse_date(value) -> dt.date | None:
 
 
 def cmd_gaps(w: Wiki) -> int:
-    after = int(w.cfg["seek"]["research_after_days"])
+    seek = w.cfg["seek"]
+    after = int(seek["research_after_days"])
     today = dt.date.today()
     rows = md_files(w.gaps)
-    print(f"seek policy: {w.cfg['seek']['policy']}; re-search after {after} days")
+    print(f"seek policy: {seek['policy']}; re-search after {after} days")
+    hosts = seek.get("trusted_hosts") or []
+    if hosts:
+        print("search these hosts first: " + ", ".join(hosts))
+    ctx = None
+    n_due = n_answered = 0
     for path in rows:
         meta, _ = frontmatter(read(path))
         status = meta.get("status", "open")
+        live = status in ("open", "candidates")
+        # A page added since may now answer the gap: re-run resolve on the question as asked.
+        answered = False
+        if live and meta.get("question"):
+            ctx = ctx or ResolveContext(w)
+            answered = resolve_question(ctx, str(meta["question"]))[0]["status"] == "resolved"
         last = parse_date(meta.get("last_searched", ""))
-        due = status in ("open", "candidates") and (last is None or (today - last).days >= after)
-        print(f"{'DUE ' if due else '    '}{status:<10} {w.rel(path)}  {meta.get('title', '')}")
-    print(f"{len(rows)} gap(s)")
+        due = (seek["policy"] != "off" and live and not answered
+               and (last is None or (today - last).days >= after))
+        n_due += due
+        n_answered += answered
+        flag = "MAY BE ANSWERED" if answered else "DUE" if due else ""
+        print(f"{flag:<16}{status:<11}{w.rel(path)}  {meta.get('title', '')}")
+    print(f"{len(rows)} gap(s), {n_due} due, {n_answered} may be answered")
     return 0
 
 
@@ -656,21 +795,40 @@ def cmd_learn_status(w: Wiki, strict: bool) -> int:
     return 1 if strict and missing else 0
 
 
+def proposal_key(key: str) -> str:
+    """'Eclipse = Transit' and 'eclipse=transit' are the same key."""
+    return "=".join(" ".join(tokens(part)) for part in str(key).split("="))
+
+
 def cmd_proposals(w: Wiki) -> int:
     rows = []
     for path in md_files(w.proposals):
         meta, _ = frontmatter(read(path))
-        rows.append((path, meta.get("status", "proposed"), meta.get("key", ""), meta.get("title", "")))
-    rejected = {k for _, s, k, _ in rows if s == "rejected" and k}
-    pending = 0
-    for path, status, key, title in rows:
-        if status != "proposed":
+        rows.append({"path": path, "status": meta.get("status", "proposed"), "kind": meta.get("kind", ""),
+                     "key": meta.get("key", ""), "norm": proposal_key(meta.get("key", "")),
+                     "title": meta.get("title", "")})
+    rejected = {r["norm"] for r in rows if r["status"] == "rejected" and r["norm"]}
+    synonyms = {proposal_key(f"{a}={b}") for a, b in w.cfg["resolve"].get("synonyms", {}).items()}
+    pending = to_apply = repeats = 0
+    for r in rows:
+        in_toml = r["kind"] == "synonym" and r["norm"] in synonyms
+        if r["status"] == "proposed":
+            pending += 1
+            if r["norm"] in rejected:
+                flag, repeats = "REPEAT", repeats + 1
+            elif in_toml:
+                flag = "IN TOML"
+            else:
+                flag = ""
+        elif r["status"] == "approved":
+            # approved by the owner, waiting for the agent to apply it
+            flag = "SET APPLIED" if in_toml else "TO APPLY"
+            to_apply += not in_toml
+        else:
             continue
-        pending += 1
-        flag = "REPEAT" if key in rejected else "      "
-        print(f"{flag} {w.rel(path)}  {key}  {title}")
-    print(f"{pending} pending, {len(rejected)} rejected key(s) on file")
-    return 1 if any(s == "proposed" and k in rejected for _, s, k, _ in rows) else 0
+        print(f"{flag:<12}{w.rel(r['path'])}  {r['key']}  {r['title']}")
+    print(f"{pending} pending, {len(rejected)} rejected key(s) on file, {to_apply} approved to apply")
+    return 1 if repeats else 0
 
 
 # ---------------------------------------------------------------- main

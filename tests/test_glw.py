@@ -302,7 +302,7 @@ class BrokenCopies(unittest.TestCase):
                    "\n- Radius of TRAPPIST-1e: 0.95 Earth radii, see [[trappist-1e]].\n")
             code, out = self.check(root)
             self.assertEqual(code, 1)
-            self.assertIn("0.95 is not on the page this line links (trappist-1e)", out)
+            self.assertIn("0.95 is not on the page this claim links (trappist-1e)", out)
 
     def test_external_quote_is_still_checked_for_numbers(self):
         with Copy() as root:
@@ -332,6 +332,120 @@ class BrokenCopies(unittest.TestCase):
             code, out = run("proposals", "--root", root)
             self.assertEqual(code, 1)
             self.assertIn("REPEAT", out)
+
+    # ---- PR B: consistency and false positives
+
+    def set_policy(self, root, policy):
+        toml = root / "glw.toml"
+        toml.write_text(toml.read_text(encoding="utf-8").replace(
+            'policy = "queue"', f'policy = "{policy}"'), encoding="utf-8")
+
+    def test_policy_typo_is_a_config_error(self):
+        with Copy() as root:
+            self.set_policy(root, "qeue")
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as ctx:
+                    run("gaps", "--root", root)
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertIn("expected one of off, queue, auto", err.getvalue())
+
+    def test_policy_off_marks_nothing_due(self):
+        with Copy() as root:
+            self.set_policy(root, "off")
+            code, out = run("gaps", "--root", root)
+            self.assertNotIn("DUE", out)
+            self.assertIn("0 due", out)
+
+    def test_answered_gap_may_be_answered(self):
+        with Copy() as root:
+            (root / "wiki/concepts/hot-jupiter.md").write_text(
+                "---\ntitle: Hot Jupiter\n---\n# Hot Jupiter\n", encoding="utf-8")
+            code, out = run("gaps", "--root", root)
+            self.assertIn("MAY BE ANSWERED", out)
+            self.assertIn("0 due, 1 may be answered", out)
+
+    def test_long_gap_slugs_cut_at_a_word_and_do_not_collide(self):
+        with Copy() as root:
+            a = resolve(root, "What is the relationship between stellar metallicity and the "
+                              "occurrence rate of giant planets around stars", "--record-gap")["gap_page"]
+            b = resolve(root, "What is the relationship between stellar metallicity and the\n"
+                              "occurrence rate of small planets", "--record-gap")["gap_page"]
+            self.assertNotEqual(a, b)
+            for page in (a, b):
+                stem = Path(page).stem
+                self.assertLessEqual(len(stem), 57)
+                self.assertRegex(stem, r"^[a-z0-9]+(-[a-z0-9]+)*-[0-9a-f]{6}$")
+                self.assertTrue(all(len(p) > 2 or p.isdigit() for p in stem.split("-")[:-1]))
+            text = (root / b).read_text(encoding="utf-8")
+            self.assertIn("question: What is the relationship between stellar metallicity and the "
+                          "occurrence rate of small planets\n", text)
+
+    def test_numbers_and_split_identifiers_resolve(self):
+        r = resolve(EXAMPLE, "Kepler 452 b period")
+        self.assertEqual(r["entity"], "wiki/entities/kepler-452b.md")
+        self.assertEqual(r["corrections"], [{"from": "452 b", "to": "452b"}])
+        r = resolve(EXAMPLE, "TRAPPIST1e radius")
+        self.assertEqual(r["entity"], "wiki/entities/trappist-1e.md")
+        self.assertEqual(r["corrections"], [{"from": "trappist1e", "to": "trappist 1e"}])
+        r = resolve(EXAMPLE, "Is TRAPPIST-1e radius 77?")
+        self.assertEqual(r["numbers"], ["77"])
+        self.assertEqual(r["unknown_terms"], [])
+        self.assertEqual(r["status"], "resolved")
+
+    def test_block_list_aliases(self):
+        with Copy() as root:
+            page = root / "wiki/concepts/transit-method.md"
+            page.write_text(page.read_text(encoding="utf-8").replace(
+                "aliases: [transit photometry]", "aliases:\n  - transit photometry"), encoding="utf-8")
+            r = resolve(root, "What is transit photometry?")
+            self.assertEqual(r["entity"], "wiki/concepts/transit-method.md")
+
+    def test_wrapped_paragraph_and_code_fence_pass(self):
+        with Copy() as root:
+            append(root / "wiki/entities/trappist-1e.md",
+                   "\nThe radius is about 0.92 Earth\nradii, close to Earth's.[^e]\n"
+                   "\n```\nx = 42\n```\n")
+            code, out = self.check(root, "--strict")
+            self.assertEqual(code, 0, out)
+
+    def test_superseded_value_checked_against_its_own_citation(self):
+        with Copy() as root:
+            page = root / "wiki/entities/trappist-1e.md"
+            append(page, "\n- ~~Radius: about 0.92 Earth radii.[^e]~~ *(superseded 2026-11-08, see [^e])*\n")
+            code, out = self.check(root, "--strict")
+            self.assertEqual(code, 0, out)
+            append(page, "\n- ~~Radius: about 0.90 Earth radii.~~ *(superseded 2026-11-08, see [^e])*\n")
+            code, out = self.check(root)
+            self.assertIn("uncited number(s) 0.90", out)
+            self.assertNotIn("0.90 is not in any quote", out)
+
+    def test_orphan_page_warns(self):
+        with Copy() as root:
+            (root / "wiki/entities/orphan.md").write_text("---\ntitle: Orphan\n---\n# Orphan\n",
+                                                          encoding="utf-8")
+            code, out = self.check(root)
+            self.assertIn("wiki/entities/orphan.md: orphan page", out)
+
+    def test_two_quotes_in_one_footnote_warn(self):
+        with Copy() as root:
+            append(root / "wiki/entities/trappist-1e.md",
+                   '\nSee this.[^z]\n\n[^z]: raw/trappist-1-note.md "TRAPPIST-1e has a radius" and "more"\n')
+            code, out = self.check(root)
+            self.assertIn("more than one quoted span", out)
+
+    def test_proposal_keys_normalised_and_approved_listed(self):
+        with Copy() as root:
+            (root / "wiki/proposals/again.md").write_text(
+                "---\ntitle: again\nkind: synonym\nkey: Eclipse = Transit\nstatus: proposed\n---\n",
+                encoding="utf-8")
+            (root / "wiki/proposals/hz.md").write_text(
+                "---\ntitle: hz\nkind: synonym\nkey: hz=habitable zone\nstatus: approved\n---\n",
+                encoding="utf-8")
+            code, out = run("proposals", "--root", root)
+            self.assertEqual(code, 1)
+            self.assertIn("REPEAT", out)
+            self.assertIn("TO APPLY", out)
+            self.assertIn("1 approved to apply", out)
 
 
 if __name__ == "__main__":
